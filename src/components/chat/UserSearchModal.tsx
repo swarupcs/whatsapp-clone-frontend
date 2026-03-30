@@ -1,40 +1,25 @@
-import { useState, useEffect } from 'react';
-import { Search, MessageCircle } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { useState } from 'react';
+import { Search } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { useChatStore } from '@/store/chatStore';
-import { cn } from '@/lib/utils';
+import { Loader2 } from 'lucide-react';
+import { useUserSearch } from '@/hooks/queries/useUsers';
+import { useCreateDirectConversation } from '@/hooks/queries/useConversations';
 
-interface UserSearchModalProps {
+interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export default function UserSearchModal({
-  open,
-  onOpenChange,
-}: UserSearchModalProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+export default function UserSearchModal({ open, onOpenChange }: Props) {
+  const [query, setQuery] = useState('');
+  const { data: results = [], isLoading } = useUserSearch(query);
+  const createDm = useCreateDirectConversation();
 
-  const { searchUsers, searchResults, createConversation } = useChatStore();
-
-  useEffect(() => {
-    const debounce = setTimeout(() => {
-      searchUsers(searchQuery);
-    }, 300);
-
-    return () => clearTimeout(debounce);
-  }, [searchQuery, searchUsers]);
-
-  const handleUserClick = (userId: string) => {
-    createConversation(userId);
-    setSearchQuery('');
+  const handleUserClick = async (userId: string) => {
+    await createDm.mutateAsync(userId);
+    setQuery('');
     onOpenChange(false);
   };
 
@@ -43,31 +28,34 @@ export default function UserSearchModal({
       <DialogContent className='sm:max-w-md bg-card border-border'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <MessageCircle className='h-5 w-5 text-primary' />
-            Start new chat
+            <Search className='h-5 w-5 text-primary' /> Start new chat
           </DialogTitle>
         </DialogHeader>
 
         <div className='space-y-4'>
-          {/* Search */}
           <div className='relative'>
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
             <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder='Search by name or email...'
               className='pl-10 bg-secondary border-0'
               autoFocus
             />
           </div>
 
-          {/* Results */}
           <div className='max-h-60 overflow-y-auto space-y-1 scrollbar-thin'>
-            {searchResults.length > 0 ? (
-              searchResults.map((user) => (
+            {isLoading && (
+              <div className='flex justify-center py-6'>
+                <Loader2 className='h-5 w-5 animate-spin text-primary' />
+              </div>
+            )}
+            {!isLoading && results.length > 0 &&
+              results.map((user) => (
                 <button
                   key={user.id}
                   onClick={() => handleUserClick(user.id)}
+                  disabled={createDm.isPending}
                   className='w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors'
                 >
                   <div className='relative'>
@@ -81,22 +69,20 @@ export default function UserSearchModal({
                   </div>
                   <div className='flex-1 text-left'>
                     <p className='font-medium'>{user.name}</p>
-                    <p className='text-sm text-muted-foreground'>
-                      {user.about || user.email}
-                    </p>
+                    <p className='text-sm text-muted-foreground'>{user.about || user.email}</p>
                   </div>
                 </button>
-              ))
-            ) : searchQuery.length > 0 ? (
+              ))}
+            {!isLoading && query.length > 0 && results.length === 0 && (
               <div className='text-center py-8 text-muted-foreground'>
                 <p>No users found</p>
                 <p className='text-sm'>Try a different search</p>
               </div>
-            ) : (
+            )}
+            {!isLoading && query.length === 0 && (
               <div className='text-center py-8 text-muted-foreground'>
                 <Search className='h-12 w-12 mx-auto mb-2 opacity-50' />
                 <p>Search for users</p>
-                <p className='text-sm'>Type a name or email to start</p>
               </div>
             )}
           </div>

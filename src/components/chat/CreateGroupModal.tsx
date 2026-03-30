@@ -1,99 +1,35 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Users, Search, Check } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { X, Users, Search, Check, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { useChatStore, type User } from '@/store/chatStore';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useUserSearch } from '@/hooks/queries/useUsers';
+import { useCreateGroup } from '@/hooks/queries/useConversations';
+import type { User } from '@/types/index';
 
-interface CreateGroupModalProps {
+interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-// Mock users for group creation
-const availableUsers: User[] = [
-  {
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=jane',
-    status: 'online',
-  },
-  {
-    id: '3',
-    name: 'Mike Johnson',
-    email: 'mike@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=mike',
-    status: 'away',
-  },
-  {
-    id: '4',
-    name: 'Sarah Wilson',
-    email: 'sarah@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=sarah',
-    status: 'offline',
-  },
-  {
-    id: '5',
-    name: 'Alex Brown',
-    email: 'alex@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=alex',
-    status: 'online',
-  },
-  {
-    id: '6',
-    name: 'Emily Davis',
-    email: 'emily@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=emily',
-    status: 'online',
-  },
-  {
-    id: '7',
-    name: 'Chris Lee',
-    email: 'chris@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=chris',
-    status: 'offline',
-  },
-  {
-    id: '8',
-    name: 'David Miller',
-    email: 'david@example.com',
-    picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=david',
-    status: 'online',
-  },
-];
-
-export default function CreateGroupModal({
-  open,
-  onOpenChange,
-}: CreateGroupModalProps) {
+export default function CreateGroupModal({ open, onOpenChange }: Props) {
   const [step, setStep] = useState<'select' | 'details'>('select');
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const createGroup = useChatStore((state) => state.createGroup);
+  const { data: searchResults = [], isLoading } = useUserSearch(searchQuery);
+  const createGroupMutation = useCreateGroup();
 
-  const filteredUsers = availableUsers.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-
-  const toggleUser = (userId: string) => {
+  const toggleUser = (user: User) => {
     setSelectedUsers((prev) =>
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : [...prev, userId],
+      prev.some((u) => u.id === user.id)
+        ? prev.filter((u) => u.id !== user.id)
+        : [...prev, user],
     );
   };
 
@@ -105,14 +41,15 @@ export default function CreateGroupModal({
     setStep('details');
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!groupName.trim()) {
       toast.error('Enter a group name');
       return;
     }
-
-    createGroup(groupName, selectedUsers);
-    toast.success('Group created successfully!');
+    await createGroupMutation.mutateAsync({
+      name: groupName,
+      userIds: selectedUsers.map((u) => u.id),
+    });
     handleClose();
   };
 
@@ -136,7 +73,6 @@ export default function CreateGroupModal({
 
         {step === 'select' ? (
           <div className='space-y-4'>
-            {/* Search */}
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
               <Input
@@ -144,56 +80,59 @@ export default function CreateGroupModal({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder='Search users...'
                 className='pl-10 bg-secondary border-0'
+                autoFocus
               />
             </div>
 
-            {/* Selected Users */}
             {selectedUsers.length > 0 && (
               <div className='flex flex-wrap gap-2'>
-                {selectedUsers.map((userId) => {
-                  const user = availableUsers.find((u) => u.id === userId);
-                  return (
-                    <motion.div
-                      key={userId}
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      exit={{ scale: 0 }}
-                      className='flex items-center gap-1 px-2 py-1 rounded-full bg-primary/20 text-primary text-sm'
-                    >
-                      <span>{user?.name.split(' ')[0]}</span>
-                      <button onClick={() => toggleUser(userId)}>
-                        <X className='h-3 w-3' />
-                      </button>
-                    </motion.div>
-                  );
-                })}
+                {selectedUsers.map((u) => (
+                  <motion.div
+                    key={u.id}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className='flex items-center gap-1 px-2 py-1 rounded-full bg-primary/20 text-primary text-sm'
+                  >
+                    <span>{u.name.split(' ')[0]}</span>
+                    <button onClick={() => toggleUser(u)}>
+                      <X className='h-3 w-3' />
+                    </button>
+                  </motion.div>
+                ))}
               </div>
             )}
 
-            {/* User List */}
             <div className='max-h-60 overflow-y-auto space-y-1 scrollbar-thin'>
-              {filteredUsers.map((user) => (
+              {isLoading && (
+                <div className='flex justify-center py-6'>
+                  <Loader2 className='h-5 w-5 animate-spin text-primary' />
+                </div>
+              )}
+              {!isLoading && searchQuery.length === 0 && (
+                <p className='text-center text-sm text-muted-foreground py-8'>
+                  Type to search for users to add
+                </p>
+              )}
+              {!isLoading && searchResults.map((u) => (
                 <button
-                  key={user.id}
-                  onClick={() => toggleUser(user.id)}
+                  key={u.id}
+                  onClick={() => toggleUser(u)}
                   className={cn(
                     'w-full flex items-center gap-3 p-2 rounded-lg transition-colors',
-                    selectedUsers.includes(user.id)
+                    selectedUsers.some((s) => s.id === u.id)
                       ? 'bg-primary/20'
                       : 'hover:bg-muted',
                   )}
                 >
                   <Avatar className='h-10 w-10'>
-                    <AvatarImage src={user.picture} />
-                    <AvatarFallback>{user.name[0]}</AvatarFallback>
+                    <AvatarImage src={u.picture} />
+                    <AvatarFallback>{u.name[0]}</AvatarFallback>
                   </Avatar>
                   <div className='flex-1 text-left'>
-                    <p className='font-medium text-sm'>{user.name}</p>
-                    <p className='text-xs text-muted-foreground'>
-                      {user.email}
-                    </p>
+                    <p className='font-medium text-sm'>{u.name}</p>
+                    <p className='text-xs text-muted-foreground'>{u.email}</p>
                   </div>
-                  {selectedUsers.includes(user.id) && (
+                  {selectedUsers.some((s) => s.id === u.id) && (
                     <div className='h-6 w-6 rounded-full bg-primary flex items-center justify-center'>
                       <Check className='h-4 w-4 text-primary-foreground' />
                     </div>
@@ -212,37 +151,27 @@ export default function CreateGroupModal({
           </div>
         ) : (
           <div className='space-y-4'>
-            {/* Group Avatar */}
             <div className='flex justify-center'>
               <div className='h-24 w-24 rounded-full bg-primary/20 flex items-center justify-center'>
                 <Users className='h-12 w-12 text-primary' />
               </div>
             </div>
 
-            {/* Group Name */}
-            <div>
-              <Input
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                placeholder='Group name'
-                className='text-center h-12 bg-secondary border-0'
-              />
-            </div>
+            <Input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder='Group name'
+              className='text-center h-12 bg-secondary border-0'
+              autoFocus
+            />
 
-            {/* Selected Members */}
             <div className='flex justify-center gap-1'>
-              {selectedUsers.slice(0, 5).map((userId) => {
-                const user = availableUsers.find((u) => u.id === userId);
-                return (
-                  <Avatar
-                    key={userId}
-                    className='h-8 w-8 border-2 border-background'
-                  >
-                    <AvatarImage src={user?.picture} />
-                    <AvatarFallback>{user?.name[0]}</AvatarFallback>
-                  </Avatar>
-                );
-              })}
+              {selectedUsers.slice(0, 5).map((u) => (
+                <Avatar key={u.id} className='h-8 w-8 border-2 border-background'>
+                  <AvatarImage src={u.picture} />
+                  <AvatarFallback>{u.name[0]}</AvatarFallback>
+                </Avatar>
+              ))}
               {selectedUsers.length > 5 && (
                 <div className='h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium'>
                   +{selectedUsers.length - 5}
@@ -251,19 +180,19 @@ export default function CreateGroupModal({
             </div>
 
             <div className='flex gap-2'>
-              <Button
-                variant='outline'
-                onClick={() => setStep('select')}
-                className='flex-1'
-              >
+              <Button variant='outline' onClick={() => setStep('select')} className='flex-1'>
                 Back
               </Button>
               <Button
                 onClick={handleCreate}
                 className='flex-1 gradient-glow'
-                disabled={!groupName.trim()}
+                disabled={!groupName.trim() || createGroupMutation.isPending}
               >
-                Create group
+                {createGroupMutation.isPending ? (
+                  <Loader2 className='h-4 w-4 animate-spin' />
+                ) : (
+                  'Create group'
+                )}
               </Button>
             </div>
           </div>

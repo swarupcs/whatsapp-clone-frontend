@@ -1,52 +1,71 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Undo2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChatStore } from '@/store/chatStore';
+import { useEditMessage } from '@/hooks/queries/useMessages';
+import { useQueryClient } from '@tanstack/react-query';
+import { messageKeys } from '@/hooks/queries/useMessages';
+import type { PaginatedResponse, Message } from '@/types/index';
 
-export default function UndoToast() {
-  const {
-    deletedMessages,
-    editedMessages,
-    undoDeleteMessage,
-    undoEditMessage,
-  } = useChatStore();
-  const [visibleToasts, setVisibleToasts] = useState<
-    { id: string; type: 'delete' | 'edit'; messageId: string }[]
-  >([]);
+interface Props {
+  conversationId: string;
+}
 
+export default function UndoToast({ conversationId }: Props) {
+  const { undoDeleteStack, undoEditStack, popUndoDelete, popUndoEdit } = useChatStore();
+  const queryClient = useQueryClient();
+  const editMessage = useEditMessage(conversationId);
+
+  // Auto-expire entries after 10s
   useEffect(() => {
-    const deleteToasts = deletedMessages.map((d) => ({
-      id: `delete-${d.message.id}`,
-      type: 'delete' as const,
-      messageId: d.message.id,
-    }));
+    const now = Date.now();
+    undoDeleteStack.forEach((entry) => {
+      if (entry.expiresAt < now) popUndoDelete(entry.message.id);
+    });
+    undoEditStack.forEach((entry) => {
+      if (entry.expiresAt < now) popUndoEdit(entry.messageId);
+    });
+  });
 
-    const editToasts = editedMessages.map((e) => ({
-      id: `edit-${e.messageId}`,
-      type: 'edit' as const,
-      messageId: e.messageId,
-    }));
-
-    setVisibleToasts([...deleteToasts, ...editToasts]);
-  }, [deletedMessages, editedMessages]);
-
-  const handleUndo = (type: 'delete' | 'edit', messageId: string) => {
-    if (type === 'delete') {
-      undoDeleteMessage(messageId);
-    } else {
-      undoEditMessage(messageId);
-    }
+  const handleUndoDelete = (messageId: string) => {
+    const entry = popUndoDelete(messageId);
+    if (!entry) return;
+    // Restore message in cache (server already soft-deleted; we just re-show it locally)
+    queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+          ...page,
+          data: page.data.map((m) =>
+            m.id === messageId ? { ...m, isDeleted: false, deletedAt: undefined } : m,
+          ),
+        })),
+      };
+    });
   };
 
-  const handleDismiss = (id: string) => {
-    setVisibleToasts((prev) => prev.filter((t) => t.id !== id));
+  const handleUndoEdit = async (messageId: string) => {
+    const entry = popUndoEdit(messageId);
+    if (!entry) return;
+    // Restore original via API
+    await editMessage.mutateAsync({ messageId, payload: { message: entry.originalMessage } });
   };
+
+  const allToasts = [
+    ...undoDeleteStack
+      .filter((e) => e.expiresAt > Date.now())
+      .map((e) => ({ id: `del-${e.message.id}`, type: 'delete' as const, messageId: e.message.id, label: 'Message deleted' })),
+    ...undoEditStack
+      .filter((e) => e.expiresAt > Date.now())
+      .map((e) => ({ id: `edit-${e.messageId}`, type: 'edit' as const, messageId: e.messageId, label: 'Message edited' })),
+  ];
 
   return (
     <div className='fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2'>
       <AnimatePresence>
-        {visibleToasts.map((toast) => (
+        {allToasts.map((toast) => (
           <motion.div
             key={toast.id}
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
@@ -54,25 +73,17 @@ export default function UndoToast() {
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             className='flex items-center gap-3 px-4 py-3 bg-card border border-border rounded-lg shadow-lg backdrop-blur-sm'
           >
-            <span className='text-sm text-foreground'>
-              {toast.type === 'delete' ? 'Message deleted' : 'Message edited'}
-            </span>
+            <span className='text-sm text-foreground'>{toast.label}</span>
             <Button
-              size='sm'
-              variant='ghost'
+              size='sm' variant='ghost'
               className='h-7 px-2 gap-1 text-primary hover:text-primary hover:bg-primary/10'
-              onClick={() => handleUndo(toast.type, toast.messageId)}
+              onClick={() =>
+                toast.type === 'delete'
+                  ? handleUndoDelete(toast.messageId)
+                  : handleUndoEdit(toast.messageId)
+              }
             >
-              <Undo2 className='h-3.5 w-3.5' />
-              Undo
-            </Button>
-            <Button
-              size='icon'
-              variant='ghost'
-              className='h-6 w-6 text-muted-foreground hover:text-foreground'
-              onClick={() => handleDismiss(toast.id)}
-            >
-              <X className='h-3.5 w-3.5' />
+              <Undo2 className='h-3.5 w-3.5' /> Undo
             </Button>
           </motion.div>
         ))}

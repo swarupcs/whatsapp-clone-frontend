@@ -1,15 +1,5 @@
-import type { User } from '@/store/chatStore';
 import { create } from 'zustand';
-
-
-export type CallStatus =
-  | 'idle'
-  | 'ringing'
-  | 'calling'
-  | 'connecting'
-  | 'connected'
-  | 'ended';
-export type CallType = 'video' | 'audio';
+import type { User, CallType, CallStatus } from '../types/index';
 
 interface CallState {
   callStatus: CallStatus;
@@ -23,7 +13,6 @@ interface CallState {
   callStartTime: number | null;
   isIncomingCall: boolean;
 
-  // Actions
   initiateCall: (receiver: User, type: CallType) => void;
   receiveCall: (caller: User, type: CallType) => void;
   acceptCall: () => void;
@@ -32,7 +21,6 @@ interface CallState {
   toggleMute: () => void;
   toggleVideo: () => void;
   toggleScreenShare: () => void;
-  updateDuration: () => void;
   simulateIncomingCall: (caller: User, type: CallType) => void;
 }
 
@@ -48,7 +36,7 @@ export const useCallStore = create<CallState>((set, get) => ({
   callStartTime: null,
   isIncomingCall: false,
 
-  initiateCall: (receiver: User, type: CallType) => {
+  initiateCall: (receiver, type) => {
     set({
       callStatus: 'calling',
       callType: type,
@@ -59,21 +47,15 @@ export const useCallStore = create<CallState>((set, get) => ({
       isMuted: false,
       callDuration: 0,
     });
-
-    // Simulate connection after 2-4 seconds
     const delay = 2000 + Math.random() * 2000;
     setTimeout(() => {
-      const state = get();
-      if (state.callStatus === 'calling') {
-        set({
-          callStatus: 'connected',
-          callStartTime: Date.now(),
-        });
+      if (get().callStatus === 'calling') {
+        set({ callStatus: 'connected', callStartTime: Date.now() });
       }
     }, delay);
   },
 
-  receiveCall: (caller: User, type: CallType) => {
+  receiveCall: (caller, type) =>
     set({
       callStatus: 'ringing',
       callType: type,
@@ -83,27 +65,17 @@ export const useCallStore = create<CallState>((set, get) => ({
       isVideoOn: type === 'video',
       isMuted: false,
       callDuration: 0,
-    });
-  },
+    }),
 
   acceptCall: () => {
-    const state = get();
-    if (state.callStatus === 'ringing') {
-      set({
-        callStatus: 'connecting',
-      });
-
-      // Simulate connection after brief delay
-      setTimeout(() => {
-        set({
-          callStatus: 'connected',
-          callStartTime: Date.now(),
-        });
-      }, 1000);
-    }
+    set({ callStatus: 'connecting' });
+    setTimeout(
+      () => set({ callStatus: 'connected', callStartTime: Date.now() }),
+      1000,
+    );
   },
 
-  rejectCall: () => {
+  rejectCall: () =>
     set({
       callStatus: 'idle',
       callType: null,
@@ -112,56 +84,34 @@ export const useCallStore = create<CallState>((set, get) => ({
       callDuration: 0,
       isIncomingCall: false,
       callStartTime: null,
-    });
-  },
+    }),
 
   endCall: () => {
-    set({
-      callStatus: 'ended',
-    });
-
-    // Reset after brief delay
-    setTimeout(() => {
-      set({
-        callStatus: 'idle',
-        callType: null,
-        caller: null,
-        receiver: null,
-        callDuration: 0,
-        isIncomingCall: false,
-        callStartTime: null,
-        isMuted: false,
-        isVideoOn: true,
-        isScreenSharing: false,
-      });
-    }, 1500);
+    set({ callStatus: 'ended' });
+    setTimeout(
+      () =>
+        set({
+          callStatus: 'idle',
+          callType: null,
+          caller: null,
+          receiver: null,
+          callDuration: 0,
+          isIncomingCall: false,
+          callStartTime: null,
+          isMuted: false,
+          isVideoOn: true,
+          isScreenSharing: false,
+        }),
+      1500,
+    );
   },
 
-  toggleMute: () => {
-    set((state) => ({ isMuted: !state.isMuted }));
-  },
+  toggleMute: () => set((s) => ({ isMuted: !s.isMuted })),
+  toggleVideo: () => set((s) => ({ isVideoOn: !s.isVideoOn })),
+  toggleScreenShare: () =>
+    set((s) => ({ isScreenSharing: !s.isScreenSharing })),
 
-  toggleVideo: () => {
-    set((state) => ({ isVideoOn: !state.isVideoOn }));
-  },
-
-  toggleScreenShare: () => {
-    set((state) => ({ isScreenSharing: !state.isScreenSharing }));
-  },
-
-  updateDuration: () => {
-    const state = get();
-    if (state.callStartTime && state.callStatus === 'connected') {
-      set({
-        callDuration: Math.floor((Date.now() - state.callStartTime) / 1000),
-      });
-    }
-  },
-
-  simulateIncomingCall: (caller: User, type: CallType) => {
-    const state = get();
-    if (state.callStatus === 'idle') {
-      get().receiveCall(caller, type);
-    }
+  simulateIncomingCall: (caller, type) => {
+    if (get().callStatus === 'idle') get().receiveCall(caller, type);
   },
 }));
