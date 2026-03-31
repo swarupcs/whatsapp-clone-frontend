@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { conversationService } from '../../services/conversation.service';
 import { useAuthStore } from '../../store/authStore';
 import type { Conversation, CreateGroupPayload } from '../../types/index';
+import { useChatStore } from '@/store/chatStore';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
 
