@@ -46,7 +46,7 @@ export function useSocket(): SocketContextType {
   return ctx;
 }
 
-// ─── Helper: patch a single message in the infinite query cache ───────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function patchCachedMessage(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -66,8 +66,6 @@ function patchCachedMessage(
   });
 }
 
-// ─── Helper: append or replace a message in the cache ────────────────────────
-
 function upsertMessageInCache(
   queryClient: ReturnType<typeof useQueryClient>,
   conversationId: string,
@@ -76,7 +74,9 @@ function upsertMessageInCache(
   queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
     if (!old) {
       return {
-        pages: [{ data: [message], total: 1, page: 1, limit: 30, hasMore: false }],
+        pages: [
+          { data: [message], total: 1, page: 1, limit: 30, hasMore: false },
+        ],
         pageParams: [1],
       };
     }
@@ -84,54 +84,68 @@ function upsertMessageInCache(
     const pages: PaginatedResponse<Message>[] = old.pages.map(
       (page: PaginatedResponse<Message>, idx: number) => {
         if (idx !== old.pages.length - 1) return page;
-
-        const existingData = page.data;
-
-        // Already present (exact real ID) → skip
-        if (existingData.some((m) => m.id === message.id)) {
-          return page;
-        }
-
-        // Replace any matching optimistic entry from same sender
-        const optimisticIdx = existingData.findIndex(
+        const existing = page.data;
+        if (existing.some((m) => m.id === message.id)) return page;
+        const optimisticIdx = existing.findIndex(
           (m) =>
             m.id.startsWith('optimistic-') &&
             m.senderId === message.senderId &&
             m.message === message.message,
         );
-
         if (optimisticIdx !== -1) {
-          const newData = [...existingData];
+          const newData = [...existing];
           newData[optimisticIdx] = message;
           return { ...page, data: newData };
         }
-
-        // Append
-        return { ...page, data: [...existingData, message] };
+        return { ...page, data: [...existing, message] };
       },
     );
-
     return { ...old, pages };
   });
+}
+
+// BUG FIX 10: Sort conversations by updatedAt descending so the most-recently
+// active conversation always appears at the top of the sidebar list.
+// The server sorts on initial fetch, but socket cache updates via .map() preserve
+// the existing array order — so without this sort, a new message in a middle
+// conversation leaves it in place instead of bubbling it to the top.
+function sortConversations(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
 }
 
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const queryClient = useQueryClient();
   const { user, token } = useAuthStore();
-  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping, setActiveConversation, activeConversation } = useChatStore();
+  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } =
+    useChatStore();
   const { simulateIncomingCall, endCall } = useCallStore();
-  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {},
+  );
 
+  // Keep a stable ref to activeConversation to avoid recreating handlers
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     const unsub = useChatStore.subscribe(
       (state) => state.activeConversation,
-      (conv) => { activeConversationRef.current = conv; },
+      (conv) => {
+        activeConversationRef.current = conv;
+      },
     );
     activeConversationRef.current = useChatStore.getState().activeConversation;
     return unsub;
   }, []);
+
+  // BUG FIX 9: Keep a stable ref to user.id so socket handlers always read the
+  // current value, even though the effect only re-runs when `token` changes.
+  // user.id is stable for a session but this pattern protects against any edge case.
+  const userIdRef = useRef<string | undefined>(user?.id);
+  useEffect(() => {
+    userIdRef.current = user?.id;
+  });
 
   useEffect(() => {
     if (!token || !user) {
@@ -146,12 +160,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       console.log('[Socket] Connected');
       setConnected(true);
     });
-
     socket.on(SOCKET_EVENTS.DISCONNECT, (reason: string) => {
       console.log('[Socket] Disconnected:', reason);
       setConnected(false);
     });
-
     socket.on(SOCKET_EVENTS.CONNECT_ERROR, (err: Error) => {
       console.error('[Socket] Connection error:', err.message);
       setConnected(false);
@@ -159,8 +171,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // ── Online presence ────────────────────────────────────────────────────
 
-    socket.on(SOCKET_EVENTS.ONLINE_USERS, ({ userIds }: { userIds: string[] }) =>
-      setOnlineUsers(userIds),
+    socket.on(
+      SOCKET_EVENTS.ONLINE_USERS,
+      ({ userIds }: { userIds: string[] }) => setOnlineUsers(userIds),
     );
     socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) =>
       setUserOnline(userId),
@@ -180,38 +193,46 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // ── New message ────────────────────────────────────────────────────────
 
-    socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message, conversation }: NewMessagePayload) => {
-      const isActiveConv = activeConversationRef.current?.id === message.conversationId;
+    socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message }: NewMessagePayload) => {
+      const currentUserId = userIdRef.current;
+      const isActiveConv =
+        activeConversationRef.current?.id === message.conversationId;
 
       upsertMessageInCache(queryClient, message.conversationId, message);
 
-      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
-        old.map((c) =>
-          c.id === message.conversationId
-            ? {
-                ...c,
-                latestMessage: message,
-                updatedAt: message.updatedAt,
-                unreadCount:
-                  message.senderId === user.id
-                    ? 0
-                    : isActiveConv
-                    ? 0
-                    : (c.unreadCount ?? 0) + 1,
-              }
-            : c,
-        ),
+      // BUG FIX 10: Re-sort conversations after updating so the active one
+      // bubbles to the top of the sidebar list
+      queryClient.setQueryData<Conversation[]>(
+        conversationKeys.all,
+        (old = []) => {
+          const updated = old.map((c) =>
+            c.id === message.conversationId
+              ? {
+                  ...c,
+                  latestMessage: message,
+                  updatedAt: message.updatedAt,
+                  unreadCount:
+                    message.senderId === currentUserId
+                      ? 0
+                      : isActiveConv
+                        ? 0
+                        : (c.unreadCount ?? 0) + 1,
+                }
+              : c,
+          );
+          return sortConversations(updated);
+        },
       );
 
-      if (!isActiveConv && message.senderId !== user.id) {
-        const convList = queryClient.getQueryData<Conversation[]>(conversationKeys.all);
+      if (!isActiveConv && message.senderId !== currentUserId) {
+        const convList = queryClient.getQueryData<Conversation[]>(
+          conversationKeys.all,
+        );
         const conv = convList?.find((c) => c.id === message.conversationId);
         const sender = conv?.users.find((u) => u.id === message.senderId);
-        const convName = conv?.name ?? 'New message';
-        // For groups: show "Group Name: Sender Name"
         const title = conv?.isGroup
-          ? `${convName}: ${sender?.name ?? 'Someone'}`
-          : sender?.name ?? 'New message';
+          ? `${conv.name}: ${sender?.name ?? 'Someone'}`
+          : (sender?.name ?? 'New message');
         notificationService.showNotification(title, {
           body: message.message.slice(0, 80) || '📎 Attachment',
           icon: conv?.isGroup ? conv.picture : sender?.picture,
@@ -222,13 +243,27 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // ── Edit / Delete ──────────────────────────────────────────────────────
 
-    socket.on(SOCKET_EVENTS.MESSAGE_EDITED, ({ message }: { message: Message }) => {
-      patchCachedMessage(queryClient, message.conversationId, message.id, () => message);
-    });
+    socket.on(
+      SOCKET_EVENTS.MESSAGE_EDITED,
+      ({ message }: { message: Message }) => {
+        patchCachedMessage(
+          queryClient,
+          message.conversationId,
+          message.id,
+          () => message,
+        );
+      },
+    );
 
     socket.on(
       SOCKET_EVENTS.MESSAGE_DELETED,
-      ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
+      ({
+        messageId,
+        conversationId,
+      }: {
+        messageId: string;
+        conversationId: string;
+      }) => {
         patchCachedMessage(queryClient, conversationId, messageId, (m) => ({
           ...m,
           isDeleted: true,
@@ -239,82 +274,126 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // ── Reactions ──────────────────────────────────────────────────────────
 
-    socket.on(SOCKET_EVENTS.REACTION_UPDATED, (data: ReactionUpdatedPayload) => {
-      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({
-        ...m,
-        reactions: data.reactions,
-      }));
-    });
+    socket.on(
+      SOCKET_EVENTS.REACTION_UPDATED,
+      (data: ReactionUpdatedPayload) => {
+        patchCachedMessage(
+          queryClient,
+          data.conversationId,
+          data.messageId,
+          (m) => ({
+            ...m,
+            reactions: data.reactions,
+          }),
+        );
+      },
+    );
 
     // ── Read receipts ──────────────────────────────────────────────────────
 
     socket.on(SOCKET_EVENTS.MESSAGE_SEEN, (data: MessageSeenPayload) => {
-      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({
-        ...m,
-        seenBy: data.seenBy,
-      }));
+      patchCachedMessage(
+        queryClient,
+        data.conversationId,
+        data.messageId,
+        (m) => ({
+          ...m,
+          seenBy: data.seenBy,
+        }),
+      );
     });
 
     // ── Pin / Unpin ────────────────────────────────────────────────────────
 
     socket.on(SOCKET_EVENTS.MESSAGE_PINNED, (data: PinPayload) => {
-      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
-      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
+      patchCachedMessage(
+        queryClient,
+        data.conversationId,
+        data.message.id,
+        () => data.message,
+      );
+      queryClient.invalidateQueries({
+        queryKey: messageKeys.pinned(data.conversationId),
+      });
     });
 
     socket.on(SOCKET_EVENTS.MESSAGE_UNPINNED, (data: PinPayload) => {
-      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
-      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
-    });
-
-    // ── BUG FIX 5 & 6: Group membership changes ────────────────────────────
-
-    // A new member was added to a group — update the conversation in the cache
-    socket.on('member_added', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
-      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
-        old.map((c) => c.id === conversationId ? conversation : c),
+      patchCachedMessage(
+        queryClient,
+        data.conversationId,
+        data.message.id,
+        () => data.message,
       );
-      // If we're currently viewing this conversation, update the active one too
-      if (activeConversationRef.current?.id === conversationId) {
-        useChatStore.getState().setActiveConversation(conversation);
-      }
+      queryClient.invalidateQueries({
+        queryKey: messageKeys.pinned(data.conversationId),
+      });
     });
 
-    // A member was removed from a group — update the conversation in the cache
-    socket.on('member_removed', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
-      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
-        old.map((c) => c.id === conversationId ? conversation : c),
-      );
-      if (activeConversationRef.current?.id === conversationId) {
-        useChatStore.getState().setActiveConversation(conversation);
-      }
-    });
+    // ── Group membership changes ───────────────────────────────────────────
 
-    // BUG FIX 5: Current user was removed from a group — remove it from the list
-    // and close the conversation if it's currently open
-    socket.on('removed_from_group', ({ conversationId }: { conversationId: string }) => {
-      toast.info('You were removed from a group');
-      // Remove from conversation list
-      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
-        old.filter((c) => c.id !== conversationId),
-      );
-      // Clear active conversation if we were viewing the removed group
-      if (activeConversationRef.current?.id === conversationId) {
-        useChatStore.getState().setActiveConversation(null);
-      }
-    });
+    socket.on(
+      'member_added',
+      ({
+        conversationId,
+        conversation,
+      }: {
+        conversationId: string;
+        conversation: Conversation;
+      }) => {
+        queryClient.setQueryData<Conversation[]>(
+          conversationKeys.all,
+          (old = []) =>
+            old.map((c) => (c.id === conversationId ? conversation : c)),
+        );
+        if (activeConversationRef.current?.id === conversationId) {
+          useChatStore.getState().setActiveConversation(conversation);
+        }
+      },
+    );
+
+    socket.on(
+      'member_removed',
+      ({
+        conversationId,
+        conversation,
+      }: {
+        conversationId: string;
+        conversation: Conversation;
+      }) => {
+        queryClient.setQueryData<Conversation[]>(
+          conversationKeys.all,
+          (old = []) =>
+            old.map((c) => (c.id === conversationId ? conversation : c)),
+        );
+        if (activeConversationRef.current?.id === conversationId) {
+          useChatStore.getState().setActiveConversation(conversation);
+        }
+      },
+    );
+
+    socket.on(
+      'removed_from_group',
+      ({ conversationId }: { conversationId: string }) => {
+        toast.info('You were removed from a group');
+        queryClient.setQueryData<Conversation[]>(
+          conversationKeys.all,
+          (old = []) => old.filter((c) => c.id !== conversationId),
+        );
+        if (activeConversationRef.current?.id === conversationId) {
+          useChatStore.getState().setActiveConversation(null);
+        }
+      },
+    );
 
     // ── Calls ──────────────────────────────────────────────────────────────
 
     socket.on(SOCKET_EVENTS.INCOMING_CALL, (data: IncomingCallPayload) => {
       simulateIncomingCall(data.caller, data.callType);
     });
-
     socket.on(SOCKET_EVENTS.CALL_REJECTED, () => {
       toast.info('Call was declined');
       endCall();
     });
-
     socket.on(SOCKET_EVENTS.CALL_ENDED, () => {
       toast.info('Call ended');
       endCall();
@@ -326,6 +405,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setConnected(false);
     };
   }, [token]);
+
+  // ── Typing emitter ─────────────────────────────────────────────────────────
 
   function emitTyping(conversationId: string, isTyping: boolean) {
     if (!user) return;

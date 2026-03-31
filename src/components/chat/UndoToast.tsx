@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Undo2, X } from 'lucide-react';
+import { Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChatStore } from '@/store/chatStore';
 import { useEditMessage } from '@/hooks/queries/useMessages';
@@ -13,25 +13,36 @@ interface Props {
 }
 
 export default function UndoToast({ conversationId }: Props) {
-  const { undoDeleteStack, undoEditStack, popUndoDelete, popUndoEdit } = useChatStore();
+  const { undoDeleteStack, undoEditStack, popUndoDelete, popUndoEdit } =
+    useChatStore();
   const queryClient = useQueryClient();
   const editMessage = useEditMessage(conversationId);
 
-  // Auto-expire entries after 10s
+  // BUG FIX 8: Replace the bare useEffect (no deps = runs every render) with a
+  // proper setInterval that checks expiry every second. The old code was running
+  // on every render and calling Zustand setters unnecessarily, which is wasteful
+  // even if it doesn't cause an infinite loop (popping already-gone entries is a no-op).
   useEffect(() => {
-    const now = Date.now();
-    undoDeleteStack.forEach((entry) => {
-      if (entry.expiresAt < now) popUndoDelete(entry.message.id);
-    });
-    undoEditStack.forEach((entry) => {
-      if (entry.expiresAt < now) popUndoEdit(entry.messageId);
-    });
-  });
+    const interval = setInterval(() => {
+      const now = Date.now();
+
+      undoDeleteStack.forEach((entry) => {
+        if (entry.expiresAt < now) popUndoDelete(entry.message.id);
+      });
+
+      undoEditStack.forEach((entry) => {
+        if (entry.expiresAt < now) popUndoEdit(entry.messageId);
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undoDeleteStack, undoEditStack]); // re-subscribe when stacks change
 
   const handleUndoDelete = (messageId: string) => {
     const entry = popUndoDelete(messageId);
     if (!entry) return;
-    // Restore message in cache (server already soft-deleted; we just re-show it locally)
+    // Restore the message in cache (server soft-deleted it; show it locally again)
     queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
       if (!old) return old;
       return {
@@ -39,7 +50,9 @@ export default function UndoToast({ conversationId }: Props) {
         pages: old.pages.map((page: PaginatedResponse<Message>) => ({
           ...page,
           data: page.data.map((m) =>
-            m.id === messageId ? { ...m, isDeleted: false, deletedAt: undefined } : m,
+            m.id === messageId
+              ? { ...m, isDeleted: false, deletedAt: undefined }
+              : m,
           ),
         })),
       };
@@ -49,18 +62,33 @@ export default function UndoToast({ conversationId }: Props) {
   const handleUndoEdit = async (messageId: string) => {
     const entry = popUndoEdit(messageId);
     if (!entry) return;
-    // Restore original via API
-    await editMessage.mutateAsync({ messageId, payload: { message: entry.originalMessage } });
+    await editMessage.mutateAsync({
+      messageId,
+      payload: { message: entry.originalMessage },
+    });
   };
 
+  const now = Date.now();
   const allToasts = [
     ...undoDeleteStack
-      .filter((e) => e.expiresAt > Date.now())
-      .map((e) => ({ id: `del-${e.message.id}`, type: 'delete' as const, messageId: e.message.id, label: 'Message deleted' })),
+      .filter((e) => e.expiresAt > now)
+      .map((e) => ({
+        id: `del-${e.message.id}`,
+        type: 'delete' as const,
+        messageId: e.message.id,
+        label: 'Message deleted',
+      })),
     ...undoEditStack
-      .filter((e) => e.expiresAt > Date.now())
-      .map((e) => ({ id: `edit-${e.messageId}`, type: 'edit' as const, messageId: e.messageId, label: 'Message edited' })),
+      .filter((e) => e.expiresAt > now)
+      .map((e) => ({
+        id: `edit-${e.messageId}`,
+        type: 'edit' as const,
+        messageId: e.messageId,
+        label: 'Message edited',
+      })),
   ];
+
+  if (allToasts.length === 0) return null;
 
   return (
     <div className='fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2'>
@@ -75,7 +103,8 @@ export default function UndoToast({ conversationId }: Props) {
           >
             <span className='text-sm text-foreground'>{toast.label}</span>
             <Button
-              size='sm' variant='ghost'
+              size='sm'
+              variant='ghost'
               className='h-7 px-2 gap-1 text-primary hover:text-primary hover:bg-primary/10'
               onClick={() =>
                 toast.type === 'delete'

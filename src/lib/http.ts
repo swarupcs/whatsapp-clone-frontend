@@ -6,8 +6,7 @@ export const BASE_URL =
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
 export const tokenStorage = {
-  getAccess: (): string | null =>
-    localStorage.getItem('whatsup_access_token'),
+  getAccess: (): string | null => localStorage.getItem('whatsup_access_token'),
   getRefresh: (): string | null =>
     localStorage.getItem('whatsup_refresh_token'),
   setTokens: (access: string, refresh: string): void => {
@@ -42,29 +41,34 @@ async function attemptRefresh(): Promise<string | null> {
   const refreshToken = tokenStorage.getRefresh();
   if (!refreshToken) return null;
 
-  const res = await fetch(`${BASE_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
+  try {
+    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
 
-  if (!res.ok) {
-    tokenStorage.clearTokens();
+    if (!res.ok) {
+      tokenStorage.clearTokens();
+      return null;
+    }
+
+    const data = (await res.json()) as ApiResponse<{
+      accessToken: string;
+      refreshToken: string;
+    }>;
+
+    if (!data.success) {
+      tokenStorage.clearTokens();
+      return null;
+    }
+
+    tokenStorage.setTokens(data.data.accessToken, data.data.refreshToken);
+    return data.data.accessToken;
+  } catch {
+    // Network error during refresh — don't clear tokens, just return null
     return null;
   }
-
-  const data = (await res.json()) as ApiResponse<{
-    accessToken: string;
-    refreshToken: string;
-  }>;
-
-  if (!data.success) {
-    tokenStorage.clearTokens();
-    return null;
-  }
-
-  tokenStorage.setTokens(data.data.accessToken, data.data.refreshToken);
-  return data.data.accessToken;
 }
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
@@ -116,11 +120,21 @@ export async function httpClient<T>(
       });
     }
 
+    // BUG FIX 13: Use try/finally so isRefreshing and refreshWaiters are ALWAYS
+    // reset, even if attemptRefresh() throws due to a network error.
+    // Previously a thrown error would permanently lock isRefreshing=true,
+    // causing all future 401s to queue up and never resolve.
     isRefreshing = true;
-    const newToken = await attemptRefresh();
-    isRefreshing = false;
-    refreshWaiters.forEach((cb) => cb(newToken));
-    refreshWaiters = [];
+    let newToken: string | null = null;
+    try {
+      newToken = await attemptRefresh();
+    } finally {
+      isRefreshing = false;
+      // Notify all queued requests regardless of success/failure
+      const waiters = refreshWaiters;
+      refreshWaiters = [];
+      waiters.forEach((cb) => cb(newToken));
+    }
 
     if (!newToken) {
       window.dispatchEvent(new Event('auth:expired'));
@@ -142,8 +156,7 @@ export async function httpClient<T>(
 // ─── Method helpers ───────────────────────────────────────────────────────────
 
 export const http = {
-  get: <T>(path: string) =>
-    httpClient<T>(path, { method: 'GET' }),
+  get: <T>(path: string) => httpClient<T>(path, { method: 'GET' }),
 
   post: <T>(path: string, body?: unknown) =>
     httpClient<T>(path, {

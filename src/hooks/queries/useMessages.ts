@@ -39,18 +39,32 @@ export function useMessages(conversationId: string) {
     getNextPageParam: (lastPage: PaginatedResponse<Message>) =>
       lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!conversationId,
-    staleTime: 0,
+    // BUG FIX 3: Changed from staleTime: 0 to 60_000.
+    // staleTime: 0 caused React Query to mark data as stale immediately, triggering
+    // a full refetch (all loaded pages) on every window focus event and component
+    // remount. For a conversation with 5 pages loaded, this means 5 API calls on
+    // every tab switch. The socket keeps the cache fresh via manual setQueryData
+    // calls, so we don't need the server to re-validate frequently.
+    staleTime: 60_000,
+    // Also disable refetchOnWindowFocus for messages — socket handles real-time updates
+    refetchOnWindowFocus: false,
     select: (data) => ({
       ...data,
-      // Flatten pages into chronological order (oldest first)
-      messages: data.pages
-        .flatMap((p) => p.data)
-        .sort(
-          (a, b) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        ),
+      // Flatten pages into chronological order and deduplicate
+      messages: deduplicateMessages(data.pages.flatMap((p) => p.data)).sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      ),
     }),
   });
+}
+
+function deduplicateMessages(messages: Message[]): Message[] {
+  const seen = new Map<string, Message>();
+  for (const msg of messages) {
+    seen.set(msg.id, msg);
+  }
+  return Array.from(seen.values());
 }
 
 // ─── usePinnedMessages ────────────────────────────────────────────────────────
@@ -64,7 +78,7 @@ export function usePinnedMessages(conversationId: string) {
   });
 }
 
-// ─── useMessageSearch (in conversation) ───────────────────────────────────────
+// ─── useMessageSearch ─────────────────────────────────────────────────────────
 
 export function useMessageSearch(conversationId: string, q: string) {
   return useQuery({
@@ -112,14 +126,14 @@ export function useSendMessage(conversationId: string) {
         : messageService.send(conversationId, payload),
 
     onMutate: async ({ payload, files }) => {
-      // Cancel any refetches
       await queryClient.cancelQueries({
         queryKey: messageKeys.list(conversationId),
       });
 
-      // Build optimistic message
+      const optimisticId = `optimistic-${Date.now()}-${Math.random()}`;
+
       const optimistic: Message = {
-        id: `optimistic-${Date.now()}`,
+        id: optimisticId,
         conversationId,
         senderId: user?.id ?? '',
         message: payload.message,
@@ -140,43 +154,47 @@ export function useSendMessage(conversationId: string) {
         updatedAt: new Date().toISOString(),
       };
 
-      // Append to last page
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => {
-          if (!old) return old;
-          const pages = [...old.pages];
-          const lastPage = pages[pages.length - 1];
-          pages[pages.length - 1] = {
-            ...lastPage,
-            data: [...lastPage.data, optimistic],
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+        if (!old) {
+          return {
+            pages: [
+              {
+                data: [optimistic],
+                total: 1,
+                page: 1,
+                limit: 30,
+                hasMore: false,
+              },
+            ],
+            pageParams: [1],
           };
-          return { ...old, pages };
-        },
-      );
+        }
+        const pages = [...old.pages];
+        const lastPage = pages[pages.length - 1];
+        pages[pages.length - 1] = {
+          ...lastPage,
+          data: [...lastPage.data, optimistic],
+        };
+        return { ...old, pages };
+      });
 
-      return { optimistic };
+      return { optimisticId };
     },
 
     onSuccess: (sent, _vars, context) => {
-      // Replace optimistic with real message
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            pages: old.pages.map((page: PaginatedResponse<Message>) => ({
-              ...page,
-              data: page.data.map((m) =>
-                m.id === context?.optimistic.id ? sent : m,
-              ),
-            })),
-          };
-        },
-      );
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+            ...page,
+            data: page.data.map((m) =>
+              m.id === context?.optimisticId ? sent : m,
+            ),
+          })),
+        };
+      });
 
-      // Update conversation latest message
       queryClient.setQueryData<Conversation[]>(
         conversationKeys.all,
         (old = []) =>
@@ -189,8 +207,7 @@ export function useSendMessage(conversationId: string) {
     },
 
     onError: (_err, _vars, context) => {
-      // Remove optimistic on failure
-      if (context?.optimistic) {
+      if (context?.optimisticId) {
         queryClient.setQueryData(
           messageKeys.list(conversationId),
           (old: any) => {
@@ -199,9 +216,7 @@ export function useSendMessage(conversationId: string) {
               ...old,
               pages: old.pages.map((page: PaginatedResponse<Message>) => ({
                 ...page,
-                data: page.data.filter(
-                  (m) => m.id !== context.optimistic.id,
-                ),
+                data: page.data.filter((m) => m.id !== context.optimisticId),
               })),
             };
           },
@@ -230,10 +245,8 @@ export function useEditMessage(conversationId: string) {
       await queryClient.cancelQueries({
         queryKey: messageKeys.list(conversationId),
       });
-
       const prev = queryClient.getQueryData(messageKeys.list(conversationId));
 
-      // Optimistic edit
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
         patchMessage(old, messageId, (m) => ({
           ...m,
@@ -246,9 +259,8 @@ export function useEditMessage(conversationId: string) {
     },
 
     onSuccess: (updated) => {
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => patchMessage(old, updated.id, () => updated),
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+        patchMessage(old, updated.id, () => updated),
       );
     },
 
@@ -277,11 +289,14 @@ export function useDeleteMessage(conversationId: string) {
       await queryClient.cancelQueries({
         queryKey: messageKeys.list(conversationId),
       });
-
       const prev = queryClient.getQueryData(messageKeys.list(conversationId));
 
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
-        patchMessage(old, messageId, (m) => ({ ...m, isDeleted: true, message: '' })),
+        patchMessage(old, messageId, (m) => ({
+          ...m,
+          isDeleted: true,
+          message: '',
+        })),
       );
 
       return { prev };
@@ -314,9 +329,8 @@ export function useToggleReaction(conversationId: string) {
     }) => messageService.toggleReaction(conversationId, messageId, payload),
 
     onSuccess: (updated) => {
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => patchMessage(old, updated.id, () => updated),
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+        patchMessage(old, updated.id, () => updated),
       );
     },
 
@@ -332,21 +346,14 @@ export function usePinMessage(conversationId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      messageId,
-      pin,
-    }: {
-      messageId: string;
-      pin: boolean;
-    }) =>
+    mutationFn: ({ messageId, pin }: { messageId: string; pin: boolean }) =>
       pin
         ? messageService.pin(conversationId, messageId)
         : messageService.unpin(conversationId, messageId),
 
     onSuccess: (updated) => {
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => patchMessage(old, updated.id, () => updated),
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+        patchMessage(old, updated.id, () => updated),
       );
       queryClient.invalidateQueries({
         queryKey: messageKeys.pinned(conversationId),
@@ -375,7 +382,6 @@ export function useForwardMessage(conversationId: string) {
       messageService.forward(conversationId, messageId, { toConversationId }),
 
     onSuccess: (forwarded) => {
-      // Optimistically update the target conversation's message list if cached
       queryClient.setQueryData(
         messageKeys.list(forwarded.conversationId),
         (old: any) => {
@@ -408,9 +414,8 @@ export function useMarkSeen(conversationId: string) {
       messageService.markSeen(conversationId, messageId),
 
     onSuccess: (updated) => {
-      queryClient.setQueryData(
-        messageKeys.list(conversationId),
-        (old: any) => patchMessage(old, updated.id, () => updated),
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+        patchMessage(old, updated.id, () => updated),
       );
     },
   });

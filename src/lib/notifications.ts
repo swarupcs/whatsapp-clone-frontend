@@ -1,30 +1,52 @@
+// BUG FIX 14: Entire class wrapped defensively so Audio() constructor failure
+// (SSR, restricted environments, missing AudioContext) doesn't crash the module.
+
 class NotificationService {
   private permission: NotificationPermission = 'default';
   private soundEnabled = true;
   private audio: HTMLAudioElement | null = null;
 
   constructor() {
-    if ('Notification' in window) this.permission = Notification.permission;
-    this.audio = new Audio(
-      'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdA==',
-    );
-    if (this.audio) this.audio.volume = 0.4;
+    if (typeof window === 'undefined') return;
+    if ('Notification' in window) {
+      this.permission = Notification.permission;
+    }
+    // BUG FIX 14: Wrap Audio construction in try/catch.
+    // new Audio() can throw in test environments, headless browsers, or when
+    // the media APIs are unavailable. A failed audio init should not prevent
+    // notifications from working entirely.
+    try {
+      this.audio = new Audio(
+        'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdA==',
+      );
+      this.audio.volume = 0.4;
+    } catch {
+      this.audio = null;
+    }
   }
 
   async requestPermission(): Promise<NotificationPermission> {
-    if (!('Notification' in window)) return 'denied';
+    if (typeof window === 'undefined' || !('Notification' in window))
+      return 'denied';
     if (this.permission === 'granted') return 'granted';
     this.permission = await Notification.requestPermission();
     return this.permission;
   }
 
   getPermission(): NotificationPermission {
-    return 'Notification' in window ? Notification.permission : 'denied';
+    if (typeof window === 'undefined' || !('Notification' in window))
+      return 'denied';
+    return Notification.permission;
   }
 
   async showNotification(
     title: string,
-    options?: { body?: string; icon?: string; tag?: string; onClick?: () => void },
+    options?: {
+      body?: string;
+      icon?: string;
+      tag?: string;
+      onClick?: () => void;
+    },
   ): Promise<void> {
     if (this.soundEnabled) this.playSound();
     if (this.permission !== 'granted') return;
@@ -36,21 +58,35 @@ class NotificationService {
         silent: true,
       });
       if (options?.onClick) {
-        n.onclick = () => { window.focus(); options.onClick?.(); n.close(); };
+        n.onclick = () => {
+          window.focus();
+          options.onClick?.();
+          n.close();
+        };
       }
       setTimeout(() => n.close(), 5000);
-    } catch {}
-  }
-
-  playSound(): void {
-    if (this.audio) {
-      this.audio.currentTime = 0;
-      this.audio.play().catch(() => {});
+    } catch {
+      // Notification API unavailable or permission revoked mid-session
     }
   }
 
-  setSoundEnabled(enabled: boolean): void { this.soundEnabled = enabled; }
-  isSoundEnabled(): boolean { return this.soundEnabled; }
+  playSound(): void {
+    if (!this.audio) return;
+    try {
+      this.audio.currentTime = 0;
+      this.audio.play().catch(() => {});
+    } catch {
+      // Audio playback failed (e.g. autoplay policy)
+    }
+  }
+
+  setSoundEnabled(enabled: boolean): void {
+    this.soundEnabled = enabled;
+  }
+
+  isSoundEnabled(): boolean {
+    return this.soundEnabled;
+  }
 }
 
 export const notificationService = new NotificationService();
