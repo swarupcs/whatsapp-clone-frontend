@@ -46,35 +46,93 @@ export function useSocket(): SocketContextType {
   return ctx;
 }
 
+// ─── Helper: patch a single message in the infinite query cache ───────────────
+
+function patchCachedMessage(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  messageId: string,
+  updater: (m: Message) => Message,
+) {
+  queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+    if (!old) return old;
+    return {
+      ...old,
+      pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+        ...page,
+        data: page.data.map((m) => (m.id === messageId ? updater(m) : m)),
+      })),
+    };
+  });
+}
+
+// ─── Helper: append or replace a message in the cache ────────────────────────
+
+function upsertMessageInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  message: Message,
+) {
+  queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+    if (!old) {
+      return {
+        pages: [{ data: [message], total: 1, page: 1, limit: 30, hasMore: false }],
+        pageParams: [1],
+      };
+    }
+
+    const pages: PaginatedResponse<Message>[] = old.pages.map(
+      (page: PaginatedResponse<Message>, idx: number) => {
+        if (idx !== old.pages.length - 1) return page;
+
+        const existingData = page.data;
+
+        // Already present (exact real ID) → skip
+        if (existingData.some((m) => m.id === message.id)) {
+          return page;
+        }
+
+        // Replace any matching optimistic entry from same sender
+        const optimisticIdx = existingData.findIndex(
+          (m) =>
+            m.id.startsWith('optimistic-') &&
+            m.senderId === message.senderId &&
+            m.message === message.message,
+        );
+
+        if (optimisticIdx !== -1) {
+          const newData = [...existingData];
+          newData[optimisticIdx] = message;
+          return { ...page, data: newData };
+        }
+
+        // Append
+        return { ...page, data: [...existingData, message] };
+      },
+    );
+
+    return { ...old, pages };
+  });
+}
+
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const queryClient = useQueryClient();
   const { user, token } = useAuthStore();
-  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } =
-    useChatStore();
+  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping, setActiveConversation, activeConversation } = useChatStore();
   const { simulateIncomingCall, endCall } = useCallStore();
-  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
-    {},
-  );
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // FIX 3: Keep a ref to activeConversation so socket handlers always
-  // read the latest value without needing to be recreated on every render.
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
-    // Subscribe to chatStore changes and keep the ref in sync
     const unsub = useChatStore.subscribe(
       (state) => state.activeConversation,
-      (conv) => {
-        activeConversationRef.current = conv;
-      },
+      (conv) => { activeConversationRef.current = conv; },
     );
-    // Set initial value immediately
     activeConversationRef.current = useChatStore.getState().activeConversation;
     return unsub;
   }, []);
 
-  // FIX 1: Depend on `token` (not just user?.id) so the socket reconnects
-  // with a fresh JWT whenever the token rotates or the user logs in/out.
   useEffect(() => {
     if (!token || !user) {
       disconnectSocket();
@@ -82,19 +140,27 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const socket = connectSocket(); // reads the latest token from tokenStorage
+    const socket = connectSocket();
 
-    socket.on(SOCKET_EVENTS.CONNECT, () => setConnected(true));
-    socket.on(SOCKET_EVENTS.DISCONNECT, () => setConnected(false));
-    socket.on(SOCKET_EVENTS.CONNECT_ERROR, (err) =>
-      console.error('[Socket]', err.message),
-    );
+    socket.on(SOCKET_EVENTS.CONNECT, () => {
+      console.log('[Socket] Connected');
+      setConnected(true);
+    });
+
+    socket.on(SOCKET_EVENTS.DISCONNECT, (reason: string) => {
+      console.log('[Socket] Disconnected:', reason);
+      setConnected(false);
+    });
+
+    socket.on(SOCKET_EVENTS.CONNECT_ERROR, (err: Error) => {
+      console.error('[Socket] Connection error:', err.message);
+      setConnected(false);
+    });
 
     // ── Online presence ────────────────────────────────────────────────────
 
-    socket.on(
-      SOCKET_EVENTS.ONLINE_USERS,
-      ({ userIds }: { userIds: string[] }) => setOnlineUsers(userIds),
+    socket.on(SOCKET_EVENTS.ONLINE_USERS, ({ userIds }: { userIds: string[] }) =>
+      setOnlineUsers(userIds),
     );
     socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) =>
       setUserOnline(userId),
@@ -113,94 +179,56 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     );
 
     // ── New message ────────────────────────────────────────────────────────
-    // FIX 3: Read activeConversation from the ref so we always have the
-    // current value without recreating this handler on every render.
 
-    socket.on(
-      SOCKET_EVENTS.NEW_MESSAGE,
-      ({ message, conversation }: NewMessagePayload) => {
-        const isActive =
-          activeConversationRef.current?.id === message.conversationId;
+    socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message, conversation }: NewMessagePayload) => {
+      const isActiveConv = activeConversationRef.current?.id === message.conversationId;
 
-        // Append to query cache for the relevant conversation
-        queryClient.setQueryData(
-          messageKeys.list(message.conversationId),
-          (old: any) => {
-            if (!old) return old;
-            const pages: PaginatedResponse<Message>[] = old.pages.map(
-              (page: PaginatedResponse<Message>, idx: number) => {
-                if (idx !== old.pages.length - 1) return page;
-                // Deduplicate: remove any optimistic copy or prior real copy
-                const filtered = page.data.filter(
-                  (m) =>
-                    !(
-                      m.id.startsWith('optimistic-') &&
-                      m.senderId === message.senderId &&
-                      m.message === message.message
-                    ) && m.id !== message.id,
-                );
-                return { ...page, data: [...filtered, message] };
-              },
-            );
-            return { ...old, pages };
-          },
-        );
+      upsertMessageInCache(queryClient, message.conversationId, message);
 
-        // Update conversation list
-        queryClient.setQueryData<Conversation[]>(
-          conversationKeys.all,
-          (old = []) =>
-            old.map((c) =>
-              c.id === message.conversationId
-                ? {
-                    ...c,
-                    latestMessage: message,
-                    updatedAt: message.updatedAt,
-                    // Only bump unread count when the conversation isn't open
-                    unreadCount: isActive ? 0 : (c.unreadCount ?? 0) + 1,
-                  }
-                : c,
-            ),
-        );
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) =>
+          c.id === message.conversationId
+            ? {
+                ...c,
+                latestMessage: message,
+                updatedAt: message.updatedAt,
+                unreadCount:
+                  message.senderId === user.id
+                    ? 0
+                    : isActiveConv
+                    ? 0
+                    : (c.unreadCount ?? 0) + 1,
+              }
+            : c,
+        ),
+      );
 
-        // Background notification (only for messages from others, when not in that chat)
-        if (!isActive && message.senderId !== user.id) {
-          const conv = queryClient
-            .getQueryData<Conversation[]>(conversationKeys.all)
-            ?.find((c) => c.id === message.conversationId);
-          const sender = conv?.users.find((u) => u.id === message.senderId);
-          notificationService.showNotification(sender?.name ?? 'New message', {
-            body: message.message.slice(0, 80),
-            icon: sender?.picture,
-            tag: `msg-${message.id}`,
-          });
-        }
-      },
-    );
+      if (!isActiveConv && message.senderId !== user.id) {
+        const convList = queryClient.getQueryData<Conversation[]>(conversationKeys.all);
+        const conv = convList?.find((c) => c.id === message.conversationId);
+        const sender = conv?.users.find((u) => u.id === message.senderId);
+        const convName = conv?.name ?? 'New message';
+        // For groups: show "Group Name: Sender Name"
+        const title = conv?.isGroup
+          ? `${convName}: ${sender?.name ?? 'Someone'}`
+          : sender?.name ?? 'New message';
+        notificationService.showNotification(title, {
+          body: message.message.slice(0, 80) || '📎 Attachment',
+          icon: conv?.isGroup ? conv.picture : sender?.picture,
+          tag: `msg-${message.id}`,
+        });
+      }
+    });
 
     // ── Edit / Delete ──────────────────────────────────────────────────────
 
-    socket.on(
-      SOCKET_EVENTS.MESSAGE_EDITED,
-      ({ message }: { message: Message }) => {
-        patchCachedMessage(
-          queryClient,
-          message.conversationId,
-          message.id,
-          () => message,
-        );
-      },
-    );
+    socket.on(SOCKET_EVENTS.MESSAGE_EDITED, ({ message }: { message: Message }) => {
+      patchCachedMessage(queryClient, message.conversationId, message.id, () => message);
+    });
 
     socket.on(
       SOCKET_EVENTS.MESSAGE_DELETED,
-      ({
-        messageId,
-        conversationId,
-      }: {
-        messageId: string;
-        conversationId: string;
-      }) => {
+      ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
         patchCachedMessage(queryClient, conversationId, messageId, (m) => ({
           ...m,
           isDeleted: true,
@@ -211,59 +239,69 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // ── Reactions ──────────────────────────────────────────────────────────
 
-    socket.on(
-      SOCKET_EVENTS.REACTION_UPDATED,
-      (data: ReactionUpdatedPayload) => {
-        patchCachedMessage(
-          queryClient,
-          data.conversationId,
-          data.messageId,
-          (m) => ({
-            ...m,
-            reactions: data.reactions,
-          }),
-        );
-      },
-    );
+    socket.on(SOCKET_EVENTS.REACTION_UPDATED, (data: ReactionUpdatedPayload) => {
+      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({
+        ...m,
+        reactions: data.reactions,
+      }));
+    });
 
     // ── Read receipts ──────────────────────────────────────────────────────
 
     socket.on(SOCKET_EVENTS.MESSAGE_SEEN, (data: MessageSeenPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.messageId,
-        (m) => ({
-          ...m,
-          seenBy: data.seenBy,
-        }),
-      );
+      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({
+        ...m,
+        seenBy: data.seenBy,
+      }));
     });
 
     // ── Pin / Unpin ────────────────────────────────────────────────────────
 
     socket.on(SOCKET_EVENTS.MESSAGE_PINNED, (data: PinPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.message.id,
-        () => data.message,
-      );
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.pinned(data.conversationId),
-      });
+      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
+      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
     });
 
     socket.on(SOCKET_EVENTS.MESSAGE_UNPINNED, (data: PinPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.message.id,
-        () => data.message,
+      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
+      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
+    });
+
+    // ── BUG FIX 5 & 6: Group membership changes ────────────────────────────
+
+    // A new member was added to a group — update the conversation in the cache
+    socket.on('member_added', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) => c.id === conversationId ? conversation : c),
       );
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.pinned(data.conversationId),
-      });
+      // If we're currently viewing this conversation, update the active one too
+      if (activeConversationRef.current?.id === conversationId) {
+        useChatStore.getState().setActiveConversation(conversation);
+      }
+    });
+
+    // A member was removed from a group — update the conversation in the cache
+    socket.on('member_removed', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) => c.id === conversationId ? conversation : c),
+      );
+      if (activeConversationRef.current?.id === conversationId) {
+        useChatStore.getState().setActiveConversation(conversation);
+      }
+    });
+
+    // BUG FIX 5: Current user was removed from a group — remove it from the list
+    // and close the conversation if it's currently open
+    socket.on('removed_from_group', ({ conversationId }: { conversationId: string }) => {
+      toast.info('You were removed from a group');
+      // Remove from conversation list
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.filter((c) => c.id !== conversationId),
+      );
+      // Clear active conversation if we were viewing the removed group
+      if (activeConversationRef.current?.id === conversationId) {
+        useChatStore.getState().setActiveConversation(null);
+      }
     });
 
     // ── Calls ──────────────────────────────────────────────────────────────
@@ -287,9 +325,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       disconnectSocket();
       setConnected(false);
     };
-  }, [token]); // FIX 1: token (not user?.id) is the correct dependency
-
-  // ── Typing emitter with debounce ─────────────────────────────────────────
+  }, [token]);
 
   function emitTyping(conversationId: string, isTyping: boolean) {
     if (!user) return;
@@ -319,24 +355,4 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       {children}
     </SocketContext.Provider>
   );
-}
-
-// ─── Helper: patch a message in the infinite query cache ──────────────────────
-
-function patchCachedMessage(
-  queryClient: ReturnType<typeof useQueryClient>,
-  conversationId: string,
-  messageId: string,
-  updater: (m: Message) => Message,
-) {
-  queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
-    if (!old) return old;
-    return {
-      ...old,
-      pages: old.pages.map((page: PaginatedResponse<Message>) => ({
-        ...page,
-        data: page.data.map((m) => (m.id === messageId ? updater(m) : m)),
-      })),
-    };
-  });
 }

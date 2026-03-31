@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import {
   Send, Paperclip, Smile, Mic, MoreVertical, Phone, Video,
   Search, ArrowLeft, Check, CheckCheck, SmilePlus, Pencil,
-  Pin, Loader2,
+  Pin, Loader2, Users, X, Crown, UserMinus, UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
 import { useMessages, useSendMessage, useEditMessage, useDeleteMessage, useToggleReaction, usePinMessage, useForwardMessage } from '@/hooks/queries/useMessages';
+import { useMarkRead } from '@/hooks/queries/useConversations';
 import { useTyping } from '@/hooks/useTyping';
 import { useScrollMessages } from '@/hooks/useScrollMessages';
 import { getAcceptedFileTypes, formatFileSize, getFileTypeInfo, getFileCategory } from '@/lib/fileUtils';
@@ -53,6 +54,8 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const [showSearch, setShowSearch] = useState(false);
   const [showFilePreview, setShowFilePreview] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  // BUG FIX 9: Group info panel state
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const additionalFileInputRef = useRef<HTMLInputElement>(null);
@@ -60,8 +63,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const { user } = useAuthStore();
   const { activeConversation, typingUsers } = useChatStore();
   const convId = activeConversation?.id ?? '';
-
-  // ── Queries & Mutations ───────────────────────────────────────────────────
 
   const {
     data,
@@ -80,7 +81,13 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const pinMessage = usePinMessage(convId);
   const forwardMessage = useForwardMessage(convId);
 
-  // ── Hooks ─────────────────────────────────────────────────────────────────
+  // BUG FIX 10: markAsRead when conversation opens or changes
+  const markRead = useMarkRead();
+  useEffect(() => {
+    if (convId) {
+      markRead.mutate(convId);
+    }
+  }, [convId]);
 
   const { handleInputChange, stopTyping } = useTyping(convId || undefined);
 
@@ -92,16 +99,12 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     fetchNextPage,
   });
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-
   const otherUser = activeConversation?.users.find((u) => u.id !== user?.id);
   const typingUserIds = convId ? (typingUsers[convId] ?? []) : [];
   const typingUsersList = activeConversation?.users.filter(
     (u) => typingUserIds.includes(u.id) && u.id !== user?.id,
   ) ?? [];
   const isOtherTyping = typingUsersList.length > 0;
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {
     if (!messageText.trim() && attachments.length === 0) return;
@@ -169,214 +172,253 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   }
 
   return (
-    <div className='flex-1 flex flex-col h-full bg-background relative'>
-      {/* Header */}
-      <div className='h-16 px-4 flex items-center gap-3 border-b border-border bg-card/50 backdrop-blur-sm relative z-10'>
-        {onBack && (
-          <Button variant='ghost' size='icon' onClick={onBack} className='lg:hidden'>
-            <ArrowLeft className='h-5 w-5' />
-          </Button>
-        )}
-        <div className='relative'>
-          <Avatar className='h-10 w-10'>
-            <AvatarImage src={activeConversation.picture} />
-            <AvatarFallback>{activeConversation.name[0]}</AvatarFallback>
-          </Avatar>
-          {otherUser?.status === 'online' && (
-            <span className='absolute bottom-0 right-0 h-3 w-3 bg-status-online rounded-full border-2 border-card' />
+    <div className='flex-1 flex h-full bg-background relative overflow-hidden'>
+      {/* Main chat column */}
+      <div className={cn('flex flex-col flex-1 h-full min-w-0', showGroupInfo && 'hidden lg:flex')}>
+        {/* Header */}
+        <div className='h-16 px-4 flex items-center gap-3 border-b border-border bg-card/50 backdrop-blur-sm relative z-10'>
+          {onBack && (
+            <Button variant='ghost' size='icon' onClick={onBack} className='lg:hidden'>
+              <ArrowLeft className='h-5 w-5' />
+            </Button>
           )}
-        </div>
-        <div className='flex-1 min-w-0'>
-          <h3 className='font-semibold truncate'>{activeConversation.name}</h3>
-          <AnimatePresence mode='wait'>
-            {isOtherTyping ? (
-              <motion.p key='typing' initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className='text-xs text-primary'>
-                {typingUsersList[0]?.name.split(' ')[0]} is typing...
-              </motion.p>
-            ) : (
-              <motion.p key='status' initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className='text-xs text-muted-foreground'>
-                {activeConversation.isGroup
-                  ? `${activeConversation.users.length} members`
-                  : otherUser?.status === 'online' ? 'online' : 'offline'}
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
-        <div className='flex items-center gap-1'>
-          <Button variant='ghost' size='icon' className='text-muted-foreground' onClick={() => setShowVideoCall(true)}>
-            <Video className='h-5 w-5' />
-          </Button>
-          <Button variant='ghost' size='icon' className='text-muted-foreground' onClick={() => setShowAudioCall(true)}>
-            <Phone className='h-5 w-5' />
-          </Button>
-          <Button
-            variant='ghost' size='icon'
-            className={cn('text-muted-foreground', showSearch && 'text-primary')}
-            onClick={() => setShowSearch(!showSearch)}
+          <button
+            className='flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition-opacity text-left'
+            onClick={() => activeConversation.isGroup && setShowGroupInfo(true)}
           >
-            <Search className='h-5 w-5' />
-          </Button>
+            <div className='relative shrink-0'>
+              <Avatar className='h-10 w-10'>
+                <AvatarImage src={activeConversation.picture} />
+                <AvatarFallback>{activeConversation.name[0]}</AvatarFallback>
+              </Avatar>
+              {!activeConversation.isGroup && otherUser?.status === 'online' && (
+                <span className='absolute bottom-0 right-0 h-3 w-3 bg-status-online rounded-full border-2 border-card' />
+              )}
+            </div>
+            <div className='flex-1 min-w-0'>
+              <h3 className='font-semibold truncate'>{activeConversation.name}</h3>
+              <AnimatePresence mode='wait'>
+                {isOtherTyping ? (
+                  <motion.p key='typing' initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className='text-xs text-primary'>
+                    {activeConversation.isGroup
+                      ? `${typingUsersList.map(u => u.name.split(' ')[0]).join(', ')} ${typingUsersList.length === 1 ? 'is' : 'are'} typing...`
+                      : `${typingUsersList[0]?.name.split(' ')[0]} is typing...`}
+                  </motion.p>
+                ) : (
+                  <motion.p key='status' initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className='text-xs text-muted-foreground'>
+                    {activeConversation.isGroup
+                      ? `${activeConversation.users.length} members`
+                      : otherUser?.status === 'online' ? 'online' : 'offline'}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
+          </button>
+          <div className='flex items-center gap-1'>
+            <Button variant='ghost' size='icon' className='text-muted-foreground' onClick={() => setShowVideoCall(true)}>
+              <Video className='h-5 w-5' />
+            </Button>
+            <Button variant='ghost' size='icon' className='text-muted-foreground' onClick={() => setShowAudioCall(true)}>
+              <Phone className='h-5 w-5' />
+            </Button>
+            <Button
+              variant='ghost' size='icon'
+              className={cn('text-muted-foreground', showSearch && 'text-primary')}
+              onClick={() => setShowSearch(!showSearch)}
+            >
+              <Search className='h-5 w-5' />
+            </Button>
+            {/* BUG FIX 9: Group info button */}
+            {activeConversation.isGroup && (
+              <Button
+                variant='ghost' size='icon'
+                className={cn('text-muted-foreground', showGroupInfo && 'text-primary')}
+                onClick={() => setShowGroupInfo(!showGroupInfo)}
+              >
+                <Users className='h-5 w-5' />
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Conversation Search */}
-      <ConversationSearch
-        isOpen={showSearch}
-        onClose={() => setShowSearch(false)}
-        messages={messages.filter((m) => !m.isDeleted)}
-        onNavigateToMessage={(id) => {
-          const el = document.getElementById(`message-${id}`);
-          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el?.classList.add('ring-2', 'ring-primary');
-          setTimeout(() => el?.classList.remove('ring-2', 'ring-primary'), 2000);
-        }}
-        currentUserId={user?.id ?? ''}
-      />
-
-      {/* Pinned Messages */}
-      <PinnedMessagesBar
-        conversationId={convId}
-        users={activeConversation.users}
-        currentUserId={user?.id ?? ''}
-        onScrollToMessage={(id) => {
-          document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }}
-      />
-
-      {/* Messages */}
-      <div className='flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin'>
-        {/* Top sentinel for infinite scroll */}
-        <div ref={topSentinelRef} className='h-1' />
-        {isFetchingNextPage && (
-          <div className='flex justify-center py-2'>
-            <Loader2 className='h-4 w-4 animate-spin text-primary' />
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className='flex items-center justify-center h-full'>
-            <Loader2 className='h-8 w-8 animate-spin text-primary' />
-          </div>
-        ) : (
-          <AnimatePresence initial={false}>
-            {messages
-              .filter((m) => !m.isDeleted)
-              .map((msg, index, arr) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  isOwn={msg.senderId === user?.id}
-                  showAvatar={index === 0 || arr[index - 1]?.senderId !== msg.senderId}
-                  sender={activeConversation.users.find((u) => u.id === msg.senderId)}
-                  currentUserId={user?.id ?? ''}
-                  conversation={activeConversation}
-                  onReaction={(emoji) => toggleReaction.mutate({ messageId: msg.id, payload: { emoji } })}
-                  onImageClick={setPreviewImage}
-                  onEdit={(messageId, newMessage) => editMessage.mutate({ messageId, payload: { message: newMessage } })}
-                  onDelete={(messageId) => deleteMessage.mutate(messageId)}
-                  onForward={(messageId) => setForwardingMessage(messages.find((m) => m.id === messageId) ?? null)}
-                  onReply={(messageId) => {
-                    const msg = messages.find((m) => m.id === messageId);
-                    if (msg) {
-                      const senderName = activeConversation.users.find((u) => u.id === msg.senderId)?.name ?? 'Unknown';
-                      setReplyingTo({ messageId: msg.id, senderId: msg.senderId, senderName, message: msg.message });
-                    }
-                  }}
-                  onPin={(messageId) => pinMessage.mutate({ messageId, pin: true })}
-                  onUnpin={(messageId) => pinMessage.mutate({ messageId, pin: false })}
-                />
-              ))}
-          </AnimatePresence>
-        )}
-
-        {isOtherTyping && (
-          <TypingIndicator typingUsers={typingUsersList} showAvatars={activeConversation.isGroup} />
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Attachment Preview */}
-      {attachments.length > 0 && !showFilePreview && (
-        <AttachmentPreview
-          attachments={attachments}
-          onRemove={(i) => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+        {/* Conversation Search */}
+        <ConversationSearch
+          isOpen={showSearch}
+          onClose={() => setShowSearch(false)}
+          messages={messages.filter((m) => !m.isDeleted)}
+          onNavigateToMessage={(id) => {
+            const el = document.getElementById(`message-${id}`);
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el?.classList.add('ring-2', 'ring-primary');
+            setTimeout(() => el?.classList.remove('ring-2', 'ring-primary'), 2000);
+          }}
+          currentUserId={user?.id ?? ''}
         />
-      )}
 
-      {/* Emoji Picker */}
-      <AnimatePresence>
-        {showEmojiPicker && (
-          <EmojiPicker
-            onSelect={(emoji) => setMessageText((prev) => prev + emoji)}
-            onClose={() => setShowEmojiPicker(false)}
-          />
-        )}
-      </AnimatePresence>
+        {/* Pinned Messages */}
+        <PinnedMessagesBar
+          conversationId={convId}
+          users={activeConversation.users}
+          currentUserId={user?.id ?? ''}
+          onScrollToMessage={(id) => {
+            document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }}
+        />
 
-      {/* Reply Preview */}
-      <AnimatePresence>
-        {replyingTo && (
-          <ReplyPreview
-            senderName={replyingTo.senderName}
-            message={replyingTo.message}
-            isOwn={replyingTo.senderId === user?.id}
-            onCancel={() => setReplyingTo(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Input */}
-      <div className='p-4 border-t border-border bg-card/50 backdrop-blur-sm'>
-        <div className='flex items-center gap-2'>
-          <Button variant='ghost' size='icon' className='text-muted-foreground shrink-0'
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-            <Smile className='h-5 w-5' />
-          </Button>
-          <Button variant='ghost' size='icon' className='text-muted-foreground shrink-0'
-            onClick={() => fileInputRef.current?.click()}>
-            <Paperclip className='h-5 w-5' />
-          </Button>
-          <input ref={fileInputRef} type='file' onChange={handleFileSelect}
-            accept={getAcceptedFileTypes()} multiple className='hidden' />
-          <input ref={additionalFileInputRef} type='file' onChange={handleFileSelect}
-            accept={getAcceptedFileTypes()} multiple className='hidden' />
-
-          <Input
-            value={messageText}
-            onChange={(e) => {
-              setMessageText(e.target.value);
-              handleInputChange();
-            }}
-            onKeyPress={handleKeyPress}
-            placeholder='Type a message...'
-            className='flex-1 h-10 bg-secondary border-0 rounded-full px-4 focus:ring-2 focus:ring-primary/50'
-          />
-
-          {messageText.trim() || attachments.length > 0 ? (
-            <Button size='icon' onClick={handleSend} disabled={sendMessage.isPending}
-              className='gradient-glow shrink-0 rounded-full'>
-              {sendMessage.isPending
-                ? <Loader2 className='h-4 w-4 animate-spin' />
-                : <Send className='h-4 w-4' />}
-            </Button>
-          ) : (
-            <Button variant='ghost' size='icon'
-              className={cn('text-muted-foreground shrink-0', isRecording && 'text-destructive')}
-              onClick={() => setIsRecording(true)}>
-              <Mic className='h-5 w-5' />
-            </Button>
+        {/* Messages */}
+        <div className='flex-1 overflow-y-auto p-4 space-y-1 scrollbar-thin'>
+          <div ref={topSentinelRef} className='h-1' />
+          {isFetchingNextPage && (
+            <div className='flex justify-center py-2'>
+              <Loader2 className='h-4 w-4 animate-spin text-primary' />
+            </div>
           )}
+
+          {isLoading ? (
+            <div className='flex items-center justify-center h-full'>
+              <Loader2 className='h-8 w-8 animate-spin text-primary' />
+            </div>
+          ) : (
+            <AnimatePresence initial={false}>
+              {messages
+                .filter((m) => !m.isDeleted)
+                .map((msg, index, arr) => {
+                  const prevMsg = arr[index - 1];
+                  const showAvatar = !prevMsg || prevMsg.senderId !== msg.senderId;
+                  // BUG FIX 7: Show sender name when it's a new sender cluster in a group
+                  const showSenderName =
+                    activeConversation.isGroup &&
+                    msg.senderId !== user?.id &&
+                    showAvatar;
+
+                  return (
+                    <MessageBubble
+                      key={msg.id}
+                      message={msg}
+                      isOwn={msg.senderId === user?.id}
+                      showAvatar={showAvatar}
+                      showSenderName={showSenderName}
+                      sender={activeConversation.users.find((u) => u.id === msg.senderId)}
+                      currentUserId={user?.id ?? ''}
+                      conversation={activeConversation}
+                      onReaction={(emoji) => toggleReaction.mutate({ messageId: msg.id, payload: { emoji } })}
+                      onImageClick={setPreviewImage}
+                      onEdit={(messageId, newMessage) => editMessage.mutate({ messageId, payload: { message: newMessage } })}
+                      onDelete={(messageId) => deleteMessage.mutate(messageId)}
+                      onForward={(messageId) => setForwardingMessage(messages.find((m) => m.id === messageId) ?? null)}
+                      onReply={(messageId) => {
+                        const m = messages.find((m) => m.id === messageId);
+                        if (m) {
+                          const senderName = activeConversation.users.find((u) => u.id === m.senderId)?.name ?? 'Unknown';
+                          setReplyingTo({ messageId: m.id, senderId: m.senderId, senderName, message: m.message });
+                        }
+                      }}
+                      onPin={(messageId) => pinMessage.mutate({ messageId, pin: true })}
+                      onUnpin={(messageId) => pinMessage.mutate({ messageId, pin: false })}
+                    />
+                  );
+                })}
+            </AnimatePresence>
+          )}
+
+          {isOtherTyping && (
+            <TypingIndicator typingUsers={typingUsersList} showAvatars={activeConversation.isGroup} />
+          )}
+          <div ref={bottomRef} />
         </div>
 
-        <VoiceRecorder
-          isRecording={isRecording}
-          onStartRecording={() => setIsRecording(true)}
-          onStopRecording={handleVoiceComplete}
-          onCancel={() => setIsRecording(false)}
-        />
+        {/* Attachment Preview */}
+        {attachments.length > 0 && !showFilePreview && (
+          <AttachmentPreview
+            attachments={attachments}
+            onRemove={(i) => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+          />
+        )}
+
+        <AnimatePresence>
+          {showEmojiPicker && (
+            <EmojiPicker
+              onSelect={(emoji) => setMessageText((prev) => prev + emoji)}
+              onClose={() => setShowEmojiPicker(false)}
+            />
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {replyingTo && (
+            <ReplyPreview
+              senderName={replyingTo.senderName}
+              message={replyingTo.message}
+              isOwn={replyingTo.senderId === user?.id}
+              onCancel={() => setReplyingTo(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Input */}
+        <div className='p-4 border-t border-border bg-card/50 backdrop-blur-sm'>
+          <div className='flex items-center gap-2'>
+            <Button variant='ghost' size='icon' className='text-muted-foreground shrink-0'
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+              <Smile className='h-5 w-5' />
+            </Button>
+            <Button variant='ghost' size='icon' className='text-muted-foreground shrink-0'
+              onClick={() => fileInputRef.current?.click()}>
+              <Paperclip className='h-5 w-5' />
+            </Button>
+            <input ref={fileInputRef} type='file' onChange={handleFileSelect}
+              accept={getAcceptedFileTypes()} multiple className='hidden' />
+            <input ref={additionalFileInputRef} type='file' onChange={handleFileSelect}
+              accept={getAcceptedFileTypes()} multiple className='hidden' />
+
+            <Input
+              value={messageText}
+              onChange={(e) => {
+                setMessageText(e.target.value);
+                handleInputChange();
+              }}
+              onKeyPress={handleKeyPress}
+              placeholder='Type a message...'
+              className='flex-1 h-10 bg-secondary border-0 rounded-full px-4 focus:ring-2 focus:ring-primary/50'
+            />
+
+            {messageText.trim() || attachments.length > 0 ? (
+              <Button size='icon' onClick={handleSend} disabled={sendMessage.isPending}
+                className='gradient-glow shrink-0 rounded-full'>
+                {sendMessage.isPending
+                  ? <Loader2 className='h-4 w-4 animate-spin' />
+                  : <Send className='h-4 w-4' />}
+              </Button>
+            ) : (
+              <Button variant='ghost' size='icon'
+                className={cn('text-muted-foreground shrink-0', isRecording && 'text-destructive')}
+                onClick={() => setIsRecording(true)}>
+                <Mic className='h-5 w-5' />
+              </Button>
+            )}
+          </div>
+
+          <VoiceRecorder
+            isRecording={isRecording}
+            onStartRecording={() => setIsRecording(true)}
+            onStopRecording={handleVoiceComplete}
+            onCancel={() => setIsRecording(false)}
+          />
+        </div>
       </div>
+
+      {/* BUG FIX 9: Group Info Sidebar Panel */}
+      <AnimatePresence>
+        {showGroupInfo && activeConversation.isGroup && (
+          <GroupInfoPanel
+            conversation={activeConversation}
+            currentUserId={user?.id ?? ''}
+            onClose={() => setShowGroupInfo(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <ImagePreviewModal isOpen={!!previewImage} onClose={() => setPreviewImage(null)}
         imageUrl={previewImage?.url ?? ''} imageName={previewImage?.name ?? ''} />
@@ -400,13 +442,103 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   );
 }
 
-// ── MessageBubble ─────────────────────────────────────────────────────────────
+// ── GroupInfoPanel ─────────────────────────────────────────────────────────────
 
+function GroupInfoPanel({
+  conversation,
+  currentUserId,
+  onClose,
+}: {
+  conversation: Conversation;
+  currentUserId: string;
+  onClose: () => void;
+}) {
+  const isAdmin = conversation.adminId === currentUserId;
+
+  return (
+    <motion.div
+      initial={{ x: '100%', opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: '100%', opacity: 0 }}
+      transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+      className='w-80 h-full border-l border-border bg-card flex flex-col shrink-0'
+    >
+      {/* Panel header */}
+      <div className='h-16 px-4 flex items-center justify-between border-b border-border'>
+        <h3 className='font-semibold'>Group info</h3>
+        <Button variant='ghost' size='icon' onClick={onClose}>
+          <X className='h-5 w-5' />
+        </Button>
+      </div>
+
+      <div className='flex-1 overflow-y-auto scrollbar-thin'>
+        {/* Group avatar + name */}
+        <div className='flex flex-col items-center py-6 px-4 border-b border-border'>
+          <Avatar className='h-20 w-20 mb-3'>
+            <AvatarImage src={conversation.picture} />
+            <AvatarFallback className='text-2xl'>{conversation.name[0]}</AvatarFallback>
+          </Avatar>
+          <h4 className='font-semibold text-lg text-center'>{conversation.name}</h4>
+          <p className='text-sm text-muted-foreground mt-1'>
+            Group · {conversation.users.length} members
+          </p>
+        </div>
+
+        {/* Members list */}
+        <div className='px-4 py-3'>
+          <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3'>
+            {conversation.users.length} members
+          </p>
+          <div className='space-y-1'>
+            {conversation.users.map((member) => {
+              const isMemberAdmin = member.id === conversation.adminId;
+              const isMe = member.id === currentUserId;
+
+              return (
+                <div
+                  key={member.id}
+                  className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors'
+                >
+                  <div className='relative shrink-0'>
+                    <Avatar className='h-10 w-10'>
+                      <AvatarImage src={member.picture} />
+                      <AvatarFallback>{member.name[0]}</AvatarFallback>
+                    </Avatar>
+                    {member.status === 'online' && (
+                      <span className='absolute bottom-0 right-0 h-2.5 w-2.5 bg-green-500 rounded-full border-2 border-card' />
+                    )}
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-center gap-1.5'>
+                      <span className='text-sm font-medium truncate'>
+                        {isMe ? 'You' : member.name}
+                      </span>
+                      {isMemberAdmin && (
+                        <Crown className='h-3.5 w-3.5 text-amber-500 shrink-0' />
+                      )}
+                    </div>
+                    <p className='text-xs text-muted-foreground truncate capitalize'>
+                      {isMemberAdmin ? 'Admin' : member.status}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── MessageBubble ─────────────────────────────────────────────────────────────
 
 interface BubbleProps {
   message: Message;
   isOwn: boolean;
   showAvatar: boolean;
+  // BUG FIX 7: new prop to control sender name display
+  showSenderName: boolean;
   sender?: User;
   currentUserId: string;
   conversation: Conversation;
@@ -421,7 +553,7 @@ interface BubbleProps {
 }
 
 function MessageBubble({
-  message, isOwn, showAvatar, sender, currentUserId, conversation,
+  message, isOwn, showAvatar, showSenderName, sender, currentUserId, conversation,
   onReaction, onImageClick, onEdit, onDelete, onForward, onReply, onPin, onUnpin,
 }: BubbleProps) {
   const [showReactionPicker, setShowReactionPicker] = useState(false);
@@ -444,14 +576,14 @@ function MessageBubble({
       onMouseLeave={() => { setIsHovered(false); setShowReactionPicker(false); }}
     >
       {!isOwn && showAvatar && (
-        <Avatar className='h-8 w-8'>
+        <Avatar className='h-8 w-8 self-end mb-1'>
           <AvatarImage src={sender?.picture} />
           <AvatarFallback>{sender?.name?.[0]}</AvatarFallback>
         </Avatar>
       )}
       {!isOwn && !showAvatar && <div className='w-8' />}
 
-      <div className='relative min-w-0'>
+      <div className='relative min-w-0 max-w-[70%]'>
         <MessageActions
           messageId={message.id}
           messageText={message.message}
@@ -492,8 +624,15 @@ function MessageBubble({
           )}
         </AnimatePresence>
 
+        {/* BUG FIX 7: Sender name above bubble for group messages from others */}
+        {showSenderName && sender && (
+          <p className='text-xs font-medium text-primary/80 mb-1 ml-1 truncate'>
+            {sender.name}
+          </p>
+        )}
+
         <div className={cn(
-          'relative max-w-[70%] rounded-2xl px-4 py-2 shadow-sm',
+          'rounded-2xl px-4 py-2 shadow-sm',
           isOwn ? 'message-bubble-sent rounded-br-md' : 'message-bubble-received rounded-bl-md',
           message.isPinned && 'ring-1 ring-primary/30',
         )}>
@@ -525,19 +664,22 @@ function MessageBubble({
                   );
                 }
                 return (
-                  <div key={file.id} className='flex items-center gap-2 p-2 rounded-lg bg-black/10'>
-                    <Icon className={cn('h-5 w-5', info.color)} />
+                  <a key={file.id} href={file.url} target='_blank' rel='noopener noreferrer'
+                    className='flex items-center gap-2 p-2 rounded-lg bg-black/10 hover:bg-black/20 transition-colors'>
+                    <Icon className={cn('h-5 w-5 shrink-0', info.color)} />
                     <div className='flex-1 min-w-0'>
                       <span className='text-sm truncate block'>{file.name}</span>
                       <span className='text-[10px] opacity-60'>{formatFileSize(file.size)}</span>
                     </div>
-                  </div>
+                  </a>
                 );
               })}
             </div>
           )}
 
-          <p className='text-sm leading-relaxed whitespace-pre-wrap'>{message.message}</p>
+          {message.message && (
+            <p className='text-sm leading-relaxed whitespace-pre-wrap break-words'>{message.message}</p>
+          )}
 
           <div className={cn('flex items-center gap-1 mt-1', isOwn ? 'justify-end' : 'justify-start')}>
             {message.isEdited && (

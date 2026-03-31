@@ -16,7 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
-import { useConversations } from '@/hooks/queries/useConversations';
+import { useConversations, useMarkRead } from '@/hooks/queries/useConversations';
 import { useLogout } from '@/hooks/queries/useAuth';
 import CreateGroupModal from './CreateGroupModal';
 import UserSearchModal from './UserSearchModal';
@@ -39,6 +39,8 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
   const { activeConversation, setActiveConversation, onlineUsers } = useChatStore();
   const { data: conversations = [], isLoading } = useConversations();
   const logoutMutation = useLogout();
+  // BUG FIX 10: markRead hook available in sidebar
+  const markRead = useMarkRead();
 
   const filtered = conversations.filter((conv) => {
     const matchesSearch = conv.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -51,6 +53,12 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
   const handleConversationClick = (conv: Conversation) => {
     setActiveConversation(conv);
     onConversationSelect?.();
+    // BUG FIX 10: Mark conversation as read immediately when user opens it
+    // This clears the unread badge both locally (via useMarkRead cache update)
+    // and on the server (so other sessions also see it as read)
+    if (conv.unreadCount > 0) {
+      markRead.mutate(conv.id);
+    }
   };
 
   const formatTime = (dateStr: string) => {
@@ -63,6 +71,24 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
   const handleLogout = async () => {
     await logoutMutation.mutateAsync();
     navigate('/login');
+  };
+
+  // Derive the preview text for the last message in a conversation
+  const getLastMessagePreview = (conv: Conversation): string => {
+    if (!conv.latestMessage) return 'Start a conversation';
+    if (conv.latestMessage.isDeleted) return 'This message was deleted';
+    if (conv.latestMessage.files && conv.latestMessage.files.length > 0 && !conv.latestMessage.message) {
+      return `📎 ${conv.latestMessage.files.length} attachment${conv.latestMessage.files.length > 1 ? 's' : ''}`;
+    }
+    return conv.latestMessage.message || 'Start a conversation';
+  };
+
+  // For group convs, show who sent the last message
+  const getLastMessageSender = (conv: Conversation): string | null => {
+    if (!conv.latestMessage || !conv.isGroup) return null;
+    if (conv.latestMessage.senderId === user?.id) return 'You';
+    const sender = conv.users.find((u) => u.id === conv.latestMessage?.senderId);
+    return sender?.name.split(' ')[0] ?? null;
   };
 
   return (
@@ -170,6 +196,8 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
               const isOnline = otherUser
                 ? onlineUsers.includes(otherUser.id)
                 : false;
+              const lastMessageSender = getLastMessageSender(conv);
+              const preview = getLastMessagePreview(conv);
 
               return (
                 <motion.div
@@ -191,8 +219,14 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
                         <AvatarImage src={conv.picture} />
                         <AvatarFallback>{conv.name[0]}</AvatarFallback>
                       </Avatar>
+                      {/* Online dot: for DMs show other user's status; for groups show group icon */}
                       {isOnline && !conv.isGroup && (
                         <span className='absolute bottom-0 right-0 h-3 w-3 bg-status-online rounded-full border-2 border-sidebar' />
+                      )}
+                      {conv.isGroup && (
+                        <span className='absolute bottom-0 right-0 h-4 w-4 bg-primary/20 rounded-full border-2 border-sidebar flex items-center justify-center'>
+                          <Users className='h-2 w-2 text-primary' />
+                        </span>
                       )}
                     </div>
 
@@ -200,23 +234,28 @@ export default function ChatSidebar({ onConversationSelect }: ChatSidebarProps) 
                       <div className='flex items-center justify-between mb-0.5'>
                         <h4 className='font-medium text-sm truncate'>{conv.name}</h4>
                         {conv.latestMessage && (
-                          <span className='text-[11px] text-muted-foreground shrink-0 ml-2'>
+                          <span className={cn(
+                            'text-[11px] shrink-0 ml-2',
+                            conv.unreadCount > 0 ? 'text-primary font-medium' : 'text-muted-foreground',
+                          )}>
                             {formatTime(conv.latestMessage.createdAt)}
                           </span>
                         )}
                       </div>
                       <div className='flex items-center gap-2'>
                         <p className='text-xs text-muted-foreground truncate flex-1'>
-                          {conv.latestMessage?.senderId === user?.id && (
+                          {/* BUG FIX 7 (sidebar): Show sender name prefix for group last message */}
+                          {lastMessageSender && (
+                            <span className='text-foreground/70'>{lastMessageSender}: </span>
+                          )}
+                          {!lastMessageSender && conv.latestMessage?.senderId === user?.id && (
                             <span className='text-primary'>You: </span>
                           )}
-                          {conv.latestMessage?.isDeleted
-                            ? 'This message was deleted'
-                            : conv.latestMessage?.message || 'Start a conversation'}
+                          {preview}
                         </p>
                         {conv.unreadCount > 0 && (
                           <span className='shrink-0 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] font-medium bg-primary text-primary-foreground rounded-full'>
-                            {conv.unreadCount}
+                            {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
                           </span>
                         )}
                       </div>
