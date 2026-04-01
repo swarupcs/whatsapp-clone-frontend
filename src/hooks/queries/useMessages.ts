@@ -44,7 +44,7 @@ export function useMessages(conversationId: string) {
     select: (data) => ({
       ...data,
       messages: deduplicateMessages(
-        data.pages.flatMap((p) => (Array.isArray(p.data) ? p.data : [])),
+        data.pages.flatMap((p) => p.data ?? []), // ✅ Correct
       ).sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
