@@ -39,13 +39,12 @@ export function useMessages(conversationId: string) {
     getNextPageParam: (lastPage: PaginatedData<Message>) =>
       lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!conversationId,
-    // Socket keeps cache fresh; no need for aggressive refetching
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     select: (data) => ({
       ...data,
       messages: deduplicateMessages(
-        data.pages.flatMap((p) => p.data),
+        data.pages.flatMap((p) => (Array.isArray(p.data) ? p.data : [])),
       ).sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -147,19 +146,30 @@ export function useSendMessage(conversationId: string) {
       };
 
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
-        if (!old)
+        if (!old) {
           return {
             pages: [
-              { data: [optimistic], total: 1, page: 1, limit: 30, hasMore: false },
+              {
+                data: [optimistic],
+                total: 1,
+                page: 1,
+                limit: 30,
+                hasMore: false,
+              },
             ],
             pageParams: [1],
           };
+        }
+
         const pages = [...old.pages];
         const last = pages[pages.length - 1];
-        pages[pages.length - 1] = { ...last, data: [...last.data, optimistic] };
+        // Guard: last.data may be undefined if the page hasn't resolved yet
+        const prevData: Message[] = Array.isArray(last?.data) ? last.data : [];
+        pages[pages.length - 1] = { ...last, data: [...prevData, optimistic] };
         return { ...old, pages };
       });
 
+      // FIX: must return optimisticId so onSuccess/onError context is defined
       return { optimisticId };
     },
 
@@ -170,9 +180,12 @@ export function useSendMessage(conversationId: string) {
           ...old,
           pages: old.pages.map((page: PaginatedData<Message>) => ({
             ...page,
-            data: page.data.map((m) =>
-              m.id === context?.optimisticId ? sent : m,
-            ),
+            // FIX: guard page.data before mapping
+            data: Array.isArray(page.data)
+              ? page.data.map((m) =>
+                  m.id === context?.optimisticId ? sent : m,
+                )
+              : [],
           })),
         };
       });
@@ -198,7 +211,10 @@ export function useSendMessage(conversationId: string) {
               ...old,
               pages: old.pages.map((page: PaginatedData<Message>) => ({
                 ...page,
-                data: page.data.filter((m) => m.id !== context.optimisticId),
+                // FIX: guard page.data before filtering
+                data: Array.isArray(page.data)
+                  ? page.data.filter((m) => m.id !== context.optimisticId)
+                  : [],
               })),
             };
           },
@@ -248,7 +264,10 @@ export function useEditMessage(conversationId: string) {
 
     onError: (_err, _vars, context) => {
       if (context?.prev)
-        queryClient.setQueryData(messageKeys.list(conversationId), context.prev);
+        queryClient.setQueryData(
+          messageKeys.list(conversationId),
+          context.prev,
+        );
       toast.error('Failed to edit message');
     },
   });
@@ -282,7 +301,10 @@ export function useDeleteMessage(conversationId: string) {
 
     onError: (_err, _vars, context) => {
       if (context?.prev)
-        queryClient.setQueryData(messageKeys.list(conversationId), context.prev);
+        queryClient.setQueryData(
+          messageKeys.list(conversationId),
+          context.prev,
+        );
       toast.error('Failed to delete message');
     },
   });
@@ -362,9 +384,13 @@ export function useForwardMessage(conversationId: string) {
           if (!old) return old;
           const pages = [...old.pages];
           const last = pages[pages.length - 1];
+          // FIX: guard last.data before spreading
+          const prevData: Message[] = Array.isArray(last?.data)
+            ? last.data
+            : [];
           pages[pages.length - 1] = {
             ...last,
-            data: [...last.data, forwarded],
+            data: [...prevData, forwarded],
           };
           return { ...old, pages };
         },
@@ -407,7 +433,10 @@ function patchMessage(
     ...old,
     pages: old.pages.map((page: PaginatedData<Message>) => ({
       ...page,
-      data: page.data.map((m) => (m.id === messageId ? updater(m) : m)),
+      // FIX: guard page.data — may be undefined during optimistic updates
+      data: Array.isArray(page.data)
+        ? page.data.map((m) => (m.id === messageId ? updater(m) : m))
+        : [],
     })),
   };
 }
