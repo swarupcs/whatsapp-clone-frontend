@@ -1,19 +1,15 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { authService } from '../../services/auth.service';
-import { tokenStorage } from '../../lib/http';
+import { authService } from '../../services';
+import { tokenStorage } from '../../lib';
 import { useAuthStore } from '../../store/authStore';
-import type { LoginPayload, RegisterPayload } from '../../types/index';
+import type { LoginPayload, RegisterPayload } from '../../types';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
 
 export const authKeys = {
   me: ['auth', 'me'] as const,
-};
+} as const;
 
 // ─── useMe ────────────────────────────────────────────────────────────────────
 
@@ -21,9 +17,9 @@ export function useMe() {
   const token = useAuthStore((s) => s.token);
   return useQuery({
     queryKey: authKeys.me,
-    queryFn: () => authService.me(),
+    queryFn: authService.me,
     enabled: !!token,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -45,7 +41,7 @@ export function useLogin() {
       toast.success(`Welcome back, ${result.user.name}!`);
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Login failed. Please try again.');
+      toast.error(err?.message ?? 'Login failed. Please try again.');
     },
   });
 }
@@ -68,7 +64,7 @@ export function useRegister() {
       toast.success('Account created successfully!');
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Registration failed. Please try again.');
+      toast.error(err?.message ?? 'Registration failed. Please try again.');
     },
   });
 }
@@ -82,9 +78,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => {
       const refresh = tokenStorage.getRefresh();
-      return refresh
-        ? authService.logout(refresh)
-        : Promise.resolve(null);
+      return refresh ? authService.logout(refresh) : Promise.resolve(null);
     },
     onSettled: () => {
       tokenStorage.clearTokens();

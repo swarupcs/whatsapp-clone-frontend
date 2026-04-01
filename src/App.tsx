@@ -15,21 +15,29 @@ import NotFound from './pages/NotFound';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 30_000,
-    },
-    mutations: {
-      retry: 0,
-    },
+    queries: { retry: 1, staleTime: 30_000 },
+    mutations: { retry: 0 },
   },
 });
 
-// Sync auth token from authStore → chatStore.token so ProtectedRoute works
 function TokenSync() {
   const authToken = useAuthStore((s) => s.token);
   const setToken = useChatStore((s) => s.setToken);
   useEffect(() => { setToken(authToken); }, [authToken, setToken]);
+  return null;
+}
+
+// Listen for session-expiry event dispatched by axios interceptor
+function AuthExpiredListener() {
+  const { clearAuth } = useAuthStore();
+  useEffect(() => {
+    const handle = () => {
+      clearAuth();
+      queryClient.clear();
+    };
+    window.addEventListener('auth:expired', handle);
+    return () => window.removeEventListener('auth:expired', handle);
+  }, [clearAuth]);
   return null;
 }
 
@@ -50,6 +58,7 @@ const App = () => (
         <Toaster position='top-center' theme='dark' />
         <BrowserRouter>
           <TokenSync />
+          <AuthExpiredListener />
           <div className='dark'>
             <Routes>
               <Route path='/' element={<ProtectedRoute><Home /></ProtectedRoute>} />

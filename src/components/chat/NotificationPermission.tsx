@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, BellOff, X, Volume2, VolumeX } from 'lucide-react';
+import { Bell, X, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { notificationService } from '@/lib/notifications';
 
@@ -12,10 +12,7 @@ export default function NotificationPermission() {
   useEffect(() => {
     const p = notificationService.getPermission();
     setPermission(p);
-    if (p === 'default') {
-      const t = setTimeout(() => setShowBanner(true), 2000);
-      return () => clearTimeout(t);
-    }
+    if (p === 'default') { const t = setTimeout(() => setShowBanner(true), 2000); return () => clearTimeout(t); }
   }, []);
 
   const handleEnable = async () => {
@@ -25,12 +22,7 @@ export default function NotificationPermission() {
     setShowBanner(false);
   };
 
-  const toggleSound = () => {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    notificationService.setSoundEnabled(next);
-    if (next) notificationService.playSound();
-  };
+  const toggleSound = () => { const next = !soundEnabled; setSoundEnabled(next); notificationService.setSoundEnabled(next); if (next) notificationService.playSound(); };
 
   return (
     <>
@@ -59,10 +51,8 @@ export default function NotificationPermission() {
           </motion.div>
         )}
       </AnimatePresence>
-
       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={toggleSound}
-        className='fixed bottom-20 right-4 z-40 h-10 w-10 rounded-full bg-card border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-colors'
-        title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}>
+        className='fixed bottom-20 right-4 z-40 h-10 w-10 rounded-full bg-card border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-colors'>
         {soundEnabled ? <Volume2 className='h-5 w-5 text-primary' /> : <VolumeX className='h-5 w-5 text-muted-foreground' />}
       </motion.button>
     </>

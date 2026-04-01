@@ -5,18 +5,18 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { messageService } from '../../services/message.service';
+import { messageService } from '../../services';
 import { conversationKeys } from './useConversations';
+import { useAuthStore } from '../../store/authStore';
 import type {
   Message,
-  PaginatedResponse,
+  PaginatedData,
   SendMessagePayload,
   EditMessagePayload,
   AddReactionPayload,
-  ReplyTo,
+  ForwardMessagePayload,
   Conversation,
-} from '../../types/index';
-import { useAuthStore } from '../../store/authStore';
+} from '../../types';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ export const messageKeys = {
   search: (convId: string, q: string) =>
     ['messages', convId, 'search', q] as const,
   globalSearch: (q: string) => ['messages', 'global-search', q] as const,
-};
+} as const;
 
 // ─── useMessages (infinite scroll) ───────────────────────────────────────────
 
@@ -36,22 +36,17 @@ export function useMessages(conversationId: string) {
     queryFn: ({ pageParam = 1 }) =>
       messageService.list(conversationId, pageParam as number, 30),
     initialPageParam: 1,
-    getNextPageParam: (lastPage: PaginatedResponse<Message>) =>
+    getNextPageParam: (lastPage: PaginatedData<Message>) =>
       lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: !!conversationId,
-    // BUG FIX 3: Changed from staleTime: 0 to 60_000.
-    // staleTime: 0 caused React Query to mark data as stale immediately, triggering
-    // a full refetch (all loaded pages) on every window focus event and component
-    // remount. For a conversation with 5 pages loaded, this means 5 API calls on
-    // every tab switch. The socket keeps the cache fresh via manual setQueryData
-    // calls, so we don't need the server to re-validate frequently.
+    // Socket keeps cache fresh; no need for aggressive refetching
     staleTime: 60_000,
-    // Also disable refetchOnWindowFocus for messages — socket handles real-time updates
     refetchOnWindowFocus: false,
     select: (data) => ({
       ...data,
-      // Flatten pages into chronological order and deduplicate
-      messages: deduplicateMessages(data.pages.flatMap((p) => p.data)).sort(
+      messages: deduplicateMessages(
+        data.pages.flatMap((p) => p.data),
+      ).sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       ),
@@ -61,9 +56,7 @@ export function useMessages(conversationId: string) {
 
 function deduplicateMessages(messages: Message[]): Message[] {
   const seen = new Map<string, Message>();
-  for (const msg of messages) {
-    seen.set(msg.id, msg);
-  }
+  for (const msg of messages) seen.set(msg.id, msg);
   return Array.from(seen.values());
 }
 
@@ -131,7 +124,6 @@ export function useSendMessage(conversationId: string) {
       });
 
       const optimisticId = `optimistic-${Date.now()}-${Math.random()}`;
-
       const optimistic: Message = {
         id: optimisticId,
         conversationId,
@@ -155,26 +147,16 @@ export function useSendMessage(conversationId: string) {
       };
 
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
-        if (!old) {
+        if (!old)
           return {
             pages: [
-              {
-                data: [optimistic],
-                total: 1,
-                page: 1,
-                limit: 30,
-                hasMore: false,
-              },
+              { data: [optimistic], total: 1, page: 1, limit: 30, hasMore: false },
             ],
             pageParams: [1],
           };
-        }
         const pages = [...old.pages];
-        const lastPage = pages[pages.length - 1];
-        pages[pages.length - 1] = {
-          ...lastPage,
-          data: [...lastPage.data, optimistic],
-        };
+        const last = pages[pages.length - 1];
+        pages[pages.length - 1] = { ...last, data: [...last.data, optimistic] };
         return { ...old, pages };
       });
 
@@ -186,7 +168,7 @@ export function useSendMessage(conversationId: string) {
         if (!old) return old;
         return {
           ...old,
-          pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+          pages: old.pages.map((page: PaginatedData<Message>) => ({
             ...page,
             data: page.data.map((m) =>
               m.id === context?.optimisticId ? sent : m,
@@ -214,7 +196,7 @@ export function useSendMessage(conversationId: string) {
             if (!old) return old;
             return {
               ...old,
-              pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+              pages: old.pages.map((page: PaginatedData<Message>) => ({
                 ...page,
                 data: page.data.filter((m) => m.id !== context.optimisticId),
               })),
@@ -265,12 +247,8 @@ export function useEditMessage(conversationId: string) {
     },
 
     onError: (_err, _vars, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(
-          messageKeys.list(conversationId),
-          context.prev,
-        );
-      }
+      if (context?.prev)
+        queryClient.setQueryData(messageKeys.list(conversationId), context.prev);
       toast.error('Failed to edit message');
     },
   });
@@ -303,12 +281,8 @@ export function useDeleteMessage(conversationId: string) {
     },
 
     onError: (_err, _vars, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(
-          messageKeys.list(conversationId),
-          context.prev,
-        );
-      }
+      if (context?.prev)
+        queryClient.setQueryData(messageKeys.list(conversationId), context.prev);
       toast.error('Failed to delete message');
     },
   });
@@ -335,7 +309,7 @@ export function useToggleReaction(conversationId: string) {
     },
 
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to add reaction');
+      toast.error(err?.message ?? 'Failed to add reaction');
     },
   });
 }
@@ -361,7 +335,7 @@ export function usePinMessage(conversationId: string) {
     },
 
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to pin/unpin message');
+      toast.error(err?.message ?? 'Failed to pin/unpin message');
     },
   });
 }
@@ -399,7 +373,7 @@ export function useForwardMessage(conversationId: string) {
     },
 
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to forward message');
+      toast.error(err?.message ?? 'Failed to forward message');
     },
   });
 }
@@ -431,7 +405,7 @@ function patchMessage(
   if (!old) return old;
   return {
     ...old,
-    pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+    pages: old.pages.map((page: PaginatedData<Message>) => ({
       ...page,
       data: page.data.map((m) => (m.id === messageId ? updater(m) : m)),
     })),

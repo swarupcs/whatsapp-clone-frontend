@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { User, CallType, CallStatus } from '../types/index';
+import type { User, CallType, CallStatus } from '../types';
 
 interface CallState {
   callStatus: CallStatus;
@@ -37,80 +37,34 @@ export const useCallStore = create<CallState>((set, get) => ({
   isIncomingCall: false,
 
   initiateCall: (receiver, type) => {
-    set({
-      callStatus: 'calling',
-      callType: type,
-      receiver,
-      caller: null,
-      isIncomingCall: false,
-      isVideoOn: type === 'video',
-      isMuted: false,
-      callDuration: 0,
-    });
-    const delay = 2000 + Math.random() * 2000;
+    set({ callStatus: 'calling', callType: type, receiver, caller: null, isIncomingCall: false, isVideoOn: type === 'video', isMuted: false, callDuration: 0 });
     setTimeout(() => {
-      if (get().callStatus === 'calling') {
+      if (get().callStatus === 'calling')
         set({ callStatus: 'connected', callStartTime: Date.now() });
-      }
-    }, delay);
+    }, 2000 + Math.random() * 2000);
   },
 
   receiveCall: (caller, type) =>
-    set({
-      callStatus: 'ringing',
-      callType: type,
-      caller,
-      receiver: null,
-      isIncomingCall: true,
-      isVideoOn: type === 'video',
-      isMuted: false,
-      callDuration: 0,
-    }),
+    set({ callStatus: 'ringing', callType: type, caller, receiver: null, isIncomingCall: true, isVideoOn: type === 'video', isMuted: false, callDuration: 0 }),
 
   acceptCall: () => {
     set({ callStatus: 'connecting' });
-    setTimeout(
-      () => set({ callStatus: 'connected', callStartTime: Date.now() }),
-      1000,
-    );
+    setTimeout(() => set({ callStatus: 'connected', callStartTime: Date.now() }), 1000);
   },
 
   rejectCall: () =>
-    set({
-      callStatus: 'idle',
-      callType: null,
-      caller: null,
-      receiver: null,
-      callDuration: 0,
-      isIncomingCall: false,
-      callStartTime: null,
-    }),
+    set({ callStatus: 'idle', callType: null, caller: null, receiver: null, callDuration: 0, isIncomingCall: false, callStartTime: null }),
 
   endCall: () => {
     set({ callStatus: 'ended' });
-    setTimeout(
-      () =>
-        set({
-          callStatus: 'idle',
-          callType: null,
-          caller: null,
-          receiver: null,
-          callDuration: 0,
-          isIncomingCall: false,
-          callStartTime: null,
-          isMuted: false,
-          isVideoOn: true,
-          isScreenSharing: false,
-        }),
-      1500,
-    );
+    setTimeout(() =>
+      set({ callStatus: 'idle', callType: null, caller: null, receiver: null, callDuration: 0, isIncomingCall: false, callStartTime: null, isMuted: false, isVideoOn: true, isScreenSharing: false }),
+    1500);
   },
 
   toggleMute: () => set((s) => ({ isMuted: !s.isMuted })),
   toggleVideo: () => set((s) => ({ isVideoOn: !s.isVideoOn })),
-  toggleScreenShare: () =>
-    set((s) => ({ isScreenSharing: !s.isScreenSharing })),
-
+  toggleScreenShare: () => set((s) => ({ isScreenSharing: !s.isScreenSharing })),
   simulateIncomingCall: (caller, type) => {
     if (get().callStatus === 'idle') get().receiveCall(caller, type);
   },

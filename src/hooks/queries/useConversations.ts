@@ -1,20 +1,21 @@
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { conversationService } from '../../services/conversation.service';
+import { conversationService } from '../../services';
 import { useAuthStore } from '../../store/authStore';
-import type { Conversation, CreateGroupPayload } from '../../types/index';
-import { useChatStore } from '@/store/chatStore';
+import { useChatStore } from '../../store/chatStore';
+import type {
+  Conversation,
+  CreateGroupPayload,
+  CreateDirectConversationPayload,
+  AddGroupMemberPayload,
+} from '../../types';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
 
 export const conversationKeys = {
   all: ['conversations'] as const,
   detail: (id: string) => ['conversations', id] as const,
-};
+} as const;
 
 // ─── useConversations ─────────────────────────────────────────────────────────
 
@@ -22,9 +23,9 @@ export function useConversations() {
   const token = useAuthStore((s) => s.token);
   return useQuery({
     queryKey: conversationKeys.all,
-    queryFn: () => conversationService.list(),
+    queryFn: conversationService.list,
     enabled: !!token,
-    staleTime: 0,                 // always re-fetch on focus — list is dynamic
+    staleTime: 0,
     refetchOnWindowFocus: true,
   });
 }
@@ -47,9 +48,9 @@ export function useCreateDirectConversation() {
   const { setActiveConversation } = useChatStore();
 
   return useMutation({
-    mutationFn: (userId: string) => conversationService.createDirect(userId),
+    mutationFn: (userId: string) =>
+      conversationService.createDirect({ userId }),
     onSuccess: (conversation) => {
-      // Prepend to cached list if not already there
       queryClient.setQueryData<Conversation[]>(
         conversationKeys.all,
         (old = []) =>
@@ -60,7 +61,7 @@ export function useCreateDirectConversation() {
       setActiveConversation(conversation);
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to start conversation');
+      toast.error(err?.message ?? 'Failed to start conversation');
     },
   });
 }
@@ -83,12 +84,12 @@ export function useCreateGroup() {
       toast.success('Group created!');
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to create group');
+      toast.error(err?.message ?? 'Failed to create group');
     },
   });
 }
 
-// ─── useMarkRead ─────────────────────────────────────────────────────────────
+// ─── useMarkRead ──────────────────────────────────────────────────────────────
 
 export function useMarkRead() {
   const queryClient = useQueryClient();
@@ -97,7 +98,6 @@ export function useMarkRead() {
     mutationFn: (conversationId: string) =>
       conversationService.markRead(conversationId),
     onSuccess: (_, conversationId) => {
-      // Zero out unread badge in cached list
       queryClient.setQueryData<Conversation[]>(
         conversationKeys.all,
         (old = []) =>
@@ -116,19 +116,19 @@ export function useAddGroupMember(conversationId: string) {
 
   return useMutation({
     mutationFn: (userId: string) =>
-      conversationService.addMember(conversationId, userId),
+      conversationService.addMember(conversationId, { userId }),
     onSuccess: (updated) => {
       queryClient.setQueryData(conversationKeys.detail(conversationId), updated);
       queryClient.invalidateQueries({ queryKey: conversationKeys.all });
       toast.success('Member added');
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to add member');
+      toast.error(err?.message ?? 'Failed to add member');
     },
   });
 }
 
-// ─── useRemoveGroupMember ────────────────────────────────────────────────────
+// ─── useRemoveGroupMember ─────────────────────────────────────────────────────
 
 export function useRemoveGroupMember(conversationId: string) {
   const queryClient = useQueryClient();
@@ -142,7 +142,7 @@ export function useRemoveGroupMember(conversationId: string) {
       toast.success('Member removed');
     },
     onError: (err: any) => {
-      toast.error(err.error ?? 'Failed to remove member');
+      toast.error(err?.message ?? 'Failed to remove member');
     },
   });
 }

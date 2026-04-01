@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
-import { tokenStorage } from './http';
-import type { TypingPayload, User, CallType } from '../types/index';
+import { tokenStorage } from './tokenStorage';
+import type { TypingPayload, User, CallType } from '../types';
 
 export const SOCKET_URL =
   (import.meta as any).env?.VITE_SOCKET_URL ?? 'http://localhost:5000';
@@ -67,41 +67,17 @@ export const socketEmit = {
   markSeen: (conversationId: string, messageId: string) =>
     socket?.emit(SOCKET_EVENTS.MARK_SEEN, { conversationId, messageId }),
 
-  toggleReaction: (
-    conversationId: string,
-    messageId: string,
-    emoji: string,
-  ) =>
-    socket?.emit(SOCKET_EVENTS.REACTION_UPDATED, {
-      conversationId,
-      messageId,
-      emoji,
-    }),
-
   pinMessage: (conversationId: string, messageId: string) =>
     socket?.emit(SOCKET_EVENTS.PIN_MESSAGE, { conversationId, messageId }),
 
   unpinMessage: (conversationId: string, messageId: string) =>
     socket?.emit(SOCKET_EVENTS.UNPIN_MESSAGE, { conversationId, messageId }),
 
-  initiateCall: (
-    conversationId: string,
-    callType: CallType,
-    caller: User,
-  ) =>
-    socket?.emit(SOCKET_EVENTS.INITIATE_CALL, {
-      conversationId,
-      callType,
-      callerId: caller.id,
-      caller,
-    }),
+  initiateCall: (conversationId: string, callType: CallType, caller: User) =>
+    socket?.emit(SOCKET_EVENTS.INITIATE_CALL, { conversationId, callType, callerId: caller.id, caller }),
 
   acceptCall: (callerId: string, conversationId: string, signal?: unknown) =>
-    socket?.emit(SOCKET_EVENTS.CALL_ACCEPTED, {
-      callerId,
-      conversationId,
-      signal,
-    }),
+    socket?.emit(SOCKET_EVENTS.CALL_ACCEPTED, { callerId, conversationId, signal }),
 
   rejectCall: (callerId: string, conversationId: string) =>
     socket?.emit(SOCKET_EVENTS.CALL_REJECTED, { callerId, conversationId }),

@@ -1,18 +1,8 @@
-import {
-  FileText, FileImage, FileVideo, FileAudio, FileArchive,
-  FileSpreadsheet, FileCode, File,
-} from 'lucide-react';
+import { FileText, FileImage, FileVideo, FileAudio, FileArchive, FileSpreadsheet, FileCode, File } from 'lucide-react';
 
-export type FileCategory =
-  | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT'
-  | 'SPREADSHEET' | 'PRESENTATION' | 'ARCHIVE' | 'OTHER';
+export type FileCategory = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'SPREADSHEET' | 'PRESENTATION' | 'ARCHIVE' | 'OTHER';
 
-interface FileTypeInfo {
-  category: FileCategory;
-  icon: typeof File;
-  color: string;
-  previewable: boolean;
-}
+interface FileTypeInfo { category: FileCategory; icon: typeof File; color: string; previewable: boolean; }
 
 const FILE_TYPE_MAP: Record<string, FileTypeInfo> = {
   'image/jpeg':   { category: 'IMAGE', icon: FileImage, color: 'text-blue-400', previewable: true },
@@ -31,30 +21,22 @@ const FILE_TYPE_MAP: Record<string, FileTypeInfo> = {
   'audio/webm':   { category: 'AUDIO', icon: FileAudio, color: 'text-green-400', previewable: false },
   'application/pdf': { category: 'DOCUMENT', icon: FileText, color: 'text-red-400', previewable: false },
   'application/msword': { category: 'DOCUMENT', icon: FileText, color: 'text-blue-500', previewable: false },
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-    { category: 'DOCUMENT', icon: FileText, color: 'text-blue-500', previewable: false },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { category: 'DOCUMENT', icon: FileText, color: 'text-blue-500', previewable: false },
   'text/plain':   { category: 'DOCUMENT', icon: FileText, color: 'text-gray-400', previewable: false },
   'application/vnd.ms-excel': { category: 'SPREADSHEET', icon: FileSpreadsheet, color: 'text-green-500', previewable: false },
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-    { category: 'SPREADSHEET', icon: FileSpreadsheet, color: 'text-green-500', previewable: false },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { category: 'SPREADSHEET', icon: FileSpreadsheet, color: 'text-green-500', previewable: false },
   'text/csv':     { category: 'SPREADSHEET', icon: FileSpreadsheet, color: 'text-green-500', previewable: false },
   'application/vnd.ms-powerpoint': { category: 'PRESENTATION', icon: FileCode, color: 'text-orange-400', previewable: false },
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation':
-    { category: 'PRESENTATION', icon: FileCode, color: 'text-orange-400', previewable: false },
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { category: 'PRESENTATION', icon: FileCode, color: 'text-orange-400', previewable: false },
   'application/zip': { category: 'ARCHIVE', icon: FileArchive, color: 'text-yellow-400', previewable: false },
   'application/x-rar-compressed': { category: 'ARCHIVE', icon: FileArchive, color: 'text-yellow-400', previewable: false },
   'application/x-7z-compressed':  { category: 'ARCHIVE', icon: FileArchive, color: 'text-yellow-400', previewable: false },
 };
 
-export function getFileTypeInfo(mimeType: string): FileTypeInfo {
-  return FILE_TYPE_MAP[mimeType] ?? {
-    category: 'OTHER', icon: File, color: 'text-muted-foreground', previewable: false,
-  };
-}
+export const getFileTypeInfo = (mimeType: string): FileTypeInfo =>
+  FILE_TYPE_MAP[mimeType] ?? { category: 'OTHER', icon: File, color: 'text-muted-foreground', previewable: false };
 
-export function getFileCategory(mimeType: string): FileCategory {
-  return getFileTypeInfo(mimeType).category;
-}
+export const getFileCategory = (mimeType: string): FileCategory => getFileTypeInfo(mimeType).category;
 
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -64,9 +46,7 @@ export function formatFileSize(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-export function getAcceptedFileTypes(): string {
-  return Object.keys(FILE_TYPE_MAP).join(',');
-}
+export const getAcceptedFileTypes = (): string => Object.keys(FILE_TYPE_MAP).join(',');
 
 export async function generateVideoThumbnail(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

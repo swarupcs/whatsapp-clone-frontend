@@ -4,7 +4,6 @@ import ChatArea from '@/components/chat/ChatArea';
 import NotificationPermission from '@/components/chat/NotificationPermission';
 import IncomingCallModal from '@/components/chat/IncomingCallModal';
 import { useChatStore } from '@/store/chatStore';
-import { useCallStore } from '@/store/callStore';
 import { cn } from '@/lib/utils';
 
 export default function Home() {
@@ -15,11 +14,9 @@ export default function Home() {
     <div className='chat-layout'>
       <NotificationPermission />
       <IncomingCallModal />
-
       <div className={cn('w-full lg:w-auto', showChat && activeConversation ? 'hidden lg:flex' : 'flex')}>
         <ChatSidebar onConversationSelect={() => setShowChat(true)} />
       </div>
-
       <div className={cn('flex-1', !showChat || !activeConversation ? 'hidden lg:flex' : 'flex')}>
         <ChatArea onBack={() => setShowChat(false)} />
       </div>

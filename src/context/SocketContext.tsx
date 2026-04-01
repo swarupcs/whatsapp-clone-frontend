@@ -1,36 +1,19 @@
 import {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
+  createContext, useContext, useEffect, useRef, useState, type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  connectSocket,
-  disconnectSocket,
-  socketEmit,
-  SOCKET_EVENTS,
-} from '../lib/socket';
+import { connectSocket, disconnectSocket, socketEmit, SOCKET_EVENTS } from '../lib/socket';
+import { notificationService } from '../lib/notifications';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import { useCallStore } from '../store/callStore';
 import { messageKeys } from '../hooks/queries/useMessages';
 import { conversationKeys } from '../hooks/queries/useConversations';
 import type {
-  Message,
-  Conversation,
-  NewMessagePayload,
-  ReactionUpdatedPayload,
-  MessageSeenPayload,
-  PinPayload,
-  IncomingCallPayload,
-  TypingPayload,
-  PaginatedResponse,
-} from '../types/index';
-import { notificationService } from '../lib/notifications';
+  Message, Conversation, NewMessagePayload, ReactionUpdatedPayload,
+  MessageSeenPayload, PinPayload, IncomingCallPayload, TypingPayload, PaginatedData,
+} from '../types';
 
 interface SocketContextType {
   connected: boolean;
@@ -46,8 +29,6 @@ export function useSocket(): SocketContextType {
   return ctx;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function patchCachedMessage(
   queryClient: ReturnType<typeof useQueryClient>,
   conversationId: string,
@@ -58,7 +39,7 @@ function patchCachedMessage(
     if (!old) return old;
     return {
       ...old,
-      pages: old.pages.map((page: PaginatedResponse<Message>) => ({
+      pages: old.pages.map((page: PaginatedData<Message>) => ({
         ...page,
         data: page.data.map((m) => (m.id === messageId ? updater(m) : m)),
       })),
@@ -72,25 +53,16 @@ function upsertMessageInCache(
   message: Message,
 ) {
   queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
-    if (!old) {
-      return {
-        pages: [
-          { data: [message], total: 1, page: 1, limit: 30, hasMore: false },
-        ],
-        pageParams: [1],
-      };
-    }
+    if (!old)
+      return { pages: [{ data: [message], total: 1, page: 1, limit: 30, hasMore: false }], pageParams: [1] };
 
-    const pages: PaginatedResponse<Message>[] = old.pages.map(
-      (page: PaginatedResponse<Message>, idx: number) => {
+    const pages: PaginatedData<Message>[] = old.pages.map(
+      (page: PaginatedData<Message>, idx: number) => {
         if (idx !== old.pages.length - 1) return page;
         const existing = page.data;
         if (existing.some((m) => m.id === message.id)) return page;
         const optimisticIdx = existing.findIndex(
-          (m) =>
-            m.id.startsWith('optimistic-') &&
-            m.senderId === message.senderId &&
-            m.message === message.message,
+          (m) => m.id.startsWith('optimistic-') && m.senderId === message.senderId && m.message === message.message,
         );
         if (optimisticIdx !== -1) {
           const newData = [...existing];
@@ -104,11 +76,6 @@ function upsertMessageInCache(
   });
 }
 
-// BUG FIX 10: Sort conversations by updatedAt descending so the most-recently
-// active conversation always appears at the top of the sidebar list.
-// The server sorts on initial fetch, but socket cache updates via .map() preserve
-// the existing array order — so without this sort, a new message in a middle
-// conversation leaves it in place instead of bubbling it to the top.
 function sortConversations(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -119,115 +86,66 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const queryClient = useQueryClient();
   const { user, token } = useAuthStore();
-  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } =
-    useChatStore();
+  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } = useChatStore();
   const { simulateIncomingCall, endCall } = useCallStore();
-  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
-    {},
-  );
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Keep a stable ref to activeConversation to avoid recreating handlers
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
     const unsub = useChatStore.subscribe(
       (state) => state.activeConversation,
-      (conv) => {
-        activeConversationRef.current = conv;
-      },
+      (conv) => { activeConversationRef.current = conv; },
     );
     activeConversationRef.current = useChatStore.getState().activeConversation;
     return unsub;
   }, []);
 
-  // BUG FIX 9: Keep a stable ref to user.id so socket handlers always read the
-  // current value, even though the effect only re-runs when `token` changes.
-  // user.id is stable for a session but this pattern protects against any edge case.
   const userIdRef = useRef<string | undefined>(user?.id);
-  useEffect(() => {
-    userIdRef.current = user?.id;
-  });
+  useEffect(() => { userIdRef.current = user?.id; });
 
   useEffect(() => {
-    if (!token || !user) {
-      disconnectSocket();
-      setConnected(false);
-      return;
-    }
+    if (!token || !user) { disconnectSocket(); setConnected(false); return; }
 
     const socket = connectSocket();
 
-    socket.on(SOCKET_EVENTS.CONNECT, () => {
-      console.log('[Socket] Connected');
-      setConnected(true);
-    });
-    socket.on(SOCKET_EVENTS.DISCONNECT, (reason: string) => {
-      console.log('[Socket] Disconnected:', reason);
-      setConnected(false);
-    });
-    socket.on(SOCKET_EVENTS.CONNECT_ERROR, (err: Error) => {
-      console.error('[Socket] Connection error:', err.message);
-      setConnected(false);
-    });
+    socket.on(SOCKET_EVENTS.CONNECT, () => setConnected(true));
+    socket.on(SOCKET_EVENTS.DISCONNECT, () => setConnected(false));
+    socket.on(SOCKET_EVENTS.CONNECT_ERROR, () => setConnected(false));
 
-    // ── Online presence ────────────────────────────────────────────────────
-
-    socket.on(
-      SOCKET_EVENTS.ONLINE_USERS,
-      ({ userIds }: { userIds: string[] }) => setOnlineUsers(userIds),
-    );
-    socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) =>
-      setUserOnline(userId),
-    );
-    socket.on(SOCKET_EVENTS.USER_OFFLINE, ({ userId }: { userId: string }) =>
-      setUserOffline(userId),
-    );
-
-    // ── Typing ────────────────────────────────────────────────────────────
+    socket.on(SOCKET_EVENTS.ONLINE_USERS, ({ userIds }: { userIds: string[] }) => setOnlineUsers(userIds));
+    socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) => setUserOnline(userId));
+    socket.on(SOCKET_EVENTS.USER_OFFLINE, ({ userId }: { userId: string }) => setUserOffline(userId));
 
     socket.on(SOCKET_EVENTS.TYPING_START, (data: TypingPayload) =>
-      setTyping(data.conversationId, data.userId, true),
-    );
+      setTyping(data.conversationId, data.userId, true));
     socket.on(SOCKET_EVENTS.TYPING_STOP, (data: TypingPayload) =>
-      setTyping(data.conversationId, data.userId, false),
-    );
-
-    // ── New message ────────────────────────────────────────────────────────
+      setTyping(data.conversationId, data.userId, false));
 
     socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message }: NewMessagePayload) => {
       const currentUserId = userIdRef.current;
-      const isActiveConv =
-        activeConversationRef.current?.id === message.conversationId;
+      const isActiveConv = activeConversationRef.current?.id === message.conversationId;
 
       upsertMessageInCache(queryClient, message.conversationId, message);
 
-      // BUG FIX 10: Re-sort conversations after updating so the active one
-      // bubbles to the top of the sidebar list
-      queryClient.setQueryData<Conversation[]>(
-        conversationKeys.all,
-        (old = []) => {
-          const updated = old.map((c) =>
-            c.id === message.conversationId
-              ? {
-                  ...c,
-                  latestMessage: message,
-                  updatedAt: message.updatedAt,
-                  unreadCount:
-                    message.senderId === currentUserId
-                      ? 0
-                      : isActiveConv
-                        ? 0
-                        : (c.unreadCount ?? 0) + 1,
-                }
-              : c,
-          );
-          return sortConversations(updated);
-        },
-      );
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) => {
+        const updated = old.map((c) =>
+          c.id === message.conversationId
+            ? {
+                ...c,
+                latestMessage: message,
+                updatedAt: message.updatedAt,
+                unreadCount:
+                  message.senderId === currentUserId ? 0
+                  : isActiveConv ? 0
+                  : (c.unreadCount ?? 0) + 1,
+              }
+            : c,
+        );
+        return sortConversations(updated);
+      });
 
       if (!isActiveConv && message.senderId !== currentUserId) {
-        const convList = queryClient.getQueryData<Conversation[]>(
-          conversationKeys.all,
-        );
+        const convList = queryClient.getQueryData<Conversation[]>(conversationKeys.all);
         const conv = convList?.find((c) => c.id === message.conversationId);
         const sender = conv?.users.find((u) => u.id === message.senderId);
         const title = conv?.isGroup
@@ -241,186 +159,70 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // ── Edit / Delete ──────────────────────────────────────────────────────
-
-    socket.on(
-      SOCKET_EVENTS.MESSAGE_EDITED,
-      ({ message }: { message: Message }) => {
-        patchCachedMessage(
-          queryClient,
-          message.conversationId,
-          message.id,
-          () => message,
-        );
-      },
-    );
-
-    socket.on(
-      SOCKET_EVENTS.MESSAGE_DELETED,
-      ({
-        messageId,
-        conversationId,
-      }: {
-        messageId: string;
-        conversationId: string;
-      }) => {
-        patchCachedMessage(queryClient, conversationId, messageId, (m) => ({
-          ...m,
-          isDeleted: true,
-          message: '',
-        }));
-      },
-    );
-
-    // ── Reactions ──────────────────────────────────────────────────────────
-
-    socket.on(
-      SOCKET_EVENTS.REACTION_UPDATED,
-      (data: ReactionUpdatedPayload) => {
-        patchCachedMessage(
-          queryClient,
-          data.conversationId,
-          data.messageId,
-          (m) => ({
-            ...m,
-            reactions: data.reactions,
-          }),
-        );
-      },
-    );
-
-    // ── Read receipts ──────────────────────────────────────────────────────
-
-    socket.on(SOCKET_EVENTS.MESSAGE_SEEN, (data: MessageSeenPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.messageId,
-        (m) => ({
-          ...m,
-          seenBy: data.seenBy,
-        }),
-      );
+    socket.on(SOCKET_EVENTS.MESSAGE_EDITED, ({ message }: { message: Message }) => {
+      patchCachedMessage(queryClient, message.conversationId, message.id, () => message);
     });
 
-    // ── Pin / Unpin ────────────────────────────────────────────────────────
+    socket.on(SOCKET_EVENTS.MESSAGE_DELETED, ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
+      patchCachedMessage(queryClient, conversationId, messageId, (m) => ({ ...m, isDeleted: true, message: '' }));
+    });
+
+    socket.on(SOCKET_EVENTS.REACTION_UPDATED, (data: ReactionUpdatedPayload) => {
+      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({ ...m, reactions: data.reactions }));
+    });
+
+    socket.on(SOCKET_EVENTS.MESSAGE_SEEN, (data: MessageSeenPayload) => {
+      patchCachedMessage(queryClient, data.conversationId, data.messageId, (m) => ({ ...m, seenBy: data.seenBy }));
+    });
 
     socket.on(SOCKET_EVENTS.MESSAGE_PINNED, (data: PinPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.message.id,
-        () => data.message,
-      );
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.pinned(data.conversationId),
-      });
+      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
+      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
     });
 
     socket.on(SOCKET_EVENTS.MESSAGE_UNPINNED, (data: PinPayload) => {
-      patchCachedMessage(
-        queryClient,
-        data.conversationId,
-        data.message.id,
-        () => data.message,
-      );
-      queryClient.invalidateQueries({
-        queryKey: messageKeys.pinned(data.conversationId),
-      });
+      patchCachedMessage(queryClient, data.conversationId, data.message.id, () => data.message);
+      queryClient.invalidateQueries({ queryKey: messageKeys.pinned(data.conversationId) });
     });
 
-    // ── Group membership changes ───────────────────────────────────────────
+    socket.on('member_added', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) => (c.id === conversationId ? conversation : c)));
+      if (activeConversationRef.current?.id === conversationId)
+        useChatStore.getState().setActiveConversation(conversation);
+    });
 
-    socket.on(
-      'member_added',
-      ({
-        conversationId,
-        conversation,
-      }: {
-        conversationId: string;
-        conversation: Conversation;
-      }) => {
-        queryClient.setQueryData<Conversation[]>(
-          conversationKeys.all,
-          (old = []) =>
-            old.map((c) => (c.id === conversationId ? conversation : c)),
-        );
-        if (activeConversationRef.current?.id === conversationId) {
-          useChatStore.getState().setActiveConversation(conversation);
-        }
-      },
-    );
+    socket.on('member_removed', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) => (c.id === conversationId ? conversation : c)));
+      if (activeConversationRef.current?.id === conversationId)
+        useChatStore.getState().setActiveConversation(conversation);
+    });
 
-    socket.on(
-      'member_removed',
-      ({
-        conversationId,
-        conversation,
-      }: {
-        conversationId: string;
-        conversation: Conversation;
-      }) => {
-        queryClient.setQueryData<Conversation[]>(
-          conversationKeys.all,
-          (old = []) =>
-            old.map((c) => (c.id === conversationId ? conversation : c)),
-        );
-        if (activeConversationRef.current?.id === conversationId) {
-          useChatStore.getState().setActiveConversation(conversation);
-        }
-      },
-    );
-
-    socket.on(
-      'removed_from_group',
-      ({ conversationId }: { conversationId: string }) => {
-        toast.info('You were removed from a group');
-        queryClient.setQueryData<Conversation[]>(
-          conversationKeys.all,
-          (old = []) => old.filter((c) => c.id !== conversationId),
-        );
-        if (activeConversationRef.current?.id === conversationId) {
-          useChatStore.getState().setActiveConversation(null);
-        }
-      },
-    );
-
-    // ── Calls ──────────────────────────────────────────────────────────────
+    socket.on('removed_from_group', ({ conversationId }: { conversationId: string }) => {
+      toast.info('You were removed from a group');
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.filter((c) => c.id !== conversationId));
+      if (activeConversationRef.current?.id === conversationId)
+        useChatStore.getState().setActiveConversation(null);
+    });
 
     socket.on(SOCKET_EVENTS.INCOMING_CALL, (data: IncomingCallPayload) => {
       simulateIncomingCall(data.caller, data.callType);
     });
-    socket.on(SOCKET_EVENTS.CALL_REJECTED, () => {
-      toast.info('Call was declined');
-      endCall();
-    });
-    socket.on(SOCKET_EVENTS.CALL_ENDED, () => {
-      toast.info('Call ended');
-      endCall();
-    });
+    socket.on(SOCKET_EVENTS.CALL_REJECTED, () => { toast.info('Call was declined'); endCall(); });
+    socket.on(SOCKET_EVENTS.CALL_ENDED, () => { toast.info('Call ended'); endCall(); });
 
-    return () => {
-      socket.removeAllListeners();
-      disconnectSocket();
-      setConnected(false);
-    };
+    return () => { socket.removeAllListeners(); disconnectSocket(); setConnected(false); };
   }, [token]);
-
-  // ── Typing emitter ─────────────────────────────────────────────────────────
 
   function emitTyping(conversationId: string, isTyping: boolean) {
     if (!user) return;
-    const payload: TypingPayload = {
-      conversationId,
-      userId: user.id,
-      userName: user.name,
-    };
+    const payload: TypingPayload = { conversationId, userId: user.id, userName: user.name };
     if (isTyping) {
       socketEmit.typing(payload);
       clearTimeout(typingTimers.current[conversationId]);
-      typingTimers.current[conversationId] = setTimeout(() => {
-        socketEmit.stopTyping(payload);
-      }, 3000);
+      typingTimers.current[conversationId] = setTimeout(() => socketEmit.stopTyping(payload), 3000);
     } else {
       clearTimeout(typingTimers.current[conversationId]);
       socketEmit.stopTyping(payload);
