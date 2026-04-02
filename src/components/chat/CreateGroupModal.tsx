@@ -39,7 +39,7 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
   // Backend requires creator + at least 2 others, so we need at least 2 selected here
   const handleNext = () => {
     if (selectedUsers.length < 2) {
-      toast.error('Select at least 2 members');
+      toast.error('Select at least 2 members to create a group');
       return;
     }
     setStep('details');
@@ -74,18 +74,22 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
             {step === 'select' ? 'Select group members' : 'Group details'}
           </DialogTitle>
         </DialogHeader>
+
         {step === 'select' ? (
           <div className='space-y-4'>
+            {/* Search input — always visible so users know what to do */}
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder='Search users...'
+                placeholder='Search users by name or email...'
                 className='pl-10 bg-secondary border-0'
                 autoFocus
               />
             </div>
+
+            {/* Selected user chips */}
             {selectedUsers.length > 0 && (
               <div className='flex flex-wrap gap-2'>
                 {selectedUsers.map((u) => (
@@ -96,53 +100,88 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
                     className='flex items-center gap-1 px-2 py-1 rounded-full bg-primary/20 text-primary text-sm'
                   >
                     <span>{u.name.split(' ')[0]}</span>
-                    <button onClick={() => toggleUser(u)}>
+                    <button
+                      onClick={() => toggleUser(u)}
+                      className='hover:text-primary/70 transition-colors'
+                    >
                       <X className='h-3 w-3' />
                     </button>
                   </motion.div>
                 ))}
               </div>
             )}
+
+            {/* Results list */}
             <div className='max-h-60 overflow-y-auto space-y-1 scrollbar-thin'>
               {isLoading && (
                 <div className='flex justify-center py-6'>
                   <Loader2 className='h-5 w-5 animate-spin text-primary' />
                 </div>
               )}
+
+              {/* Prompt to start searching */}
               {!isLoading && searchQuery.length === 0 && (
-                <p className='text-center text-sm text-muted-foreground py-8'>
-                  Type to search for users to add
-                </p>
+                <div className='flex flex-col items-center justify-center py-8 text-muted-foreground gap-2'>
+                  <Search className='h-8 w-8 opacity-40' />
+                  <p className='text-sm text-center'>
+                    Search for people to add to the group.
+                    <br />
+                    You need at least 2 members.
+                  </p>
+                </div>
               )}
+
+              {/* No results */}
               {!isLoading &&
-                searchResults.map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => toggleUser(u)}
-                    className={cn(
-                      'w-full flex items-center gap-3 p-2 rounded-lg transition-colors',
-                      selectedUsers.some((s) => s.id === u.id)
-                        ? 'bg-primary/20'
-                        : 'hover:bg-muted',
-                    )}
-                  >
-                    <Avatar className='h-10 w-10'>
-                      <AvatarImage src={u.picture} />
-                      <AvatarFallback>{u.name[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className='flex-1 text-left'>
-                      <p className='font-medium text-sm'>{u.name}</p>
-                      <p className='text-xs text-muted-foreground'>{u.email}</p>
-                    </div>
-                    {selectedUsers.some((s) => s.id === u.id) && (
-                      <div className='h-6 w-6 rounded-full bg-primary flex items-center justify-center'>
-                        <Check className='h-4 w-4 text-primary-foreground' />
+                searchQuery.length > 0 &&
+                searchResults.length === 0 && (
+                  <p className='text-center text-sm text-muted-foreground py-8'>
+                    No users found for "{searchQuery}"
+                  </p>
+                )}
+
+              {/* Results */}
+              {!isLoading &&
+                searchResults.map((u) => {
+                  const isSelected = selectedUsers.some((s) => s.id === u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => toggleUser(u)}
+                      className={cn(
+                        'w-full flex items-center gap-3 p-2 rounded-lg transition-colors',
+                        isSelected ? 'bg-primary/20' : 'hover:bg-muted',
+                      )}
+                    >
+                      <Avatar className='h-10 w-10'>
+                        <AvatarImage src={u.picture} />
+                        <AvatarFallback>{u.name[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className='flex-1 text-left'>
+                        <p className='font-medium text-sm'>{u.name}</p>
+                        <p className='text-xs text-muted-foreground'>
+                          {u.email}
+                        </p>
                       </div>
-                    )}
-                  </button>
-                ))}
+                      {isSelected && (
+                        <div className='h-6 w-6 rounded-full bg-primary flex items-center justify-center shrink-0'>
+                          <Check className='h-4 w-4 text-primary-foreground' />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
             </div>
-            <div className='space-y-1'>
+
+            {/* Footer: count + next button */}
+            <div className='space-y-2'>
+              <p className='text-xs text-center text-muted-foreground'>
+                {selectedUsers.length === 0
+                  ? 'No members selected yet'
+                  : selectedUsers.length === 1
+                    ? '1 member selected — need at least 1 more'
+                    : `${selectedUsers.length} members selected ✓`}
+              </p>
               <Button
                 onClick={handleNext}
                 className='w-full gradient-glow'
@@ -150,11 +189,6 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
               >
                 Next ({selectedUsers.length} selected)
               </Button>
-              {selectedUsers.length > 0 && selectedUsers.length < 2 && (
-                <p className='text-xs text-muted-foreground text-center'>
-                  Select at least 2 members to create a group
-                </p>
-              )}
             </div>
           </div>
         ) : (
@@ -167,11 +201,14 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
             <Input
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreate();
+              }}
               placeholder='Group name'
               className='text-center h-12 bg-secondary border-0'
               autoFocus
             />
-            <div className='flex justify-center gap-1'>
+            <div className='flex justify-center gap-1 flex-wrap'>
               {selectedUsers.slice(0, 5).map((u) => (
                 <Avatar
                   key={u.id}
@@ -187,6 +224,9 @@ export default function CreateGroupModal({ open, onOpenChange }: Props) {
                 </div>
               )}
             </div>
+            <p className='text-xs text-center text-muted-foreground'>
+              {selectedUsers.length + 1} members (including you)
+            </p>
             <div className='flex gap-2'>
               <Button
                 variant='outline'
