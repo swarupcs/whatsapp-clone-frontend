@@ -22,6 +22,8 @@ import {
   WifiOff,
   AlertCircle,
   RotateCw,
+  LogOut,
+  UserMinus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,7 +40,11 @@ import {
   usePinMessage,
   useForwardMessage,
 } from '@/hooks/queries/useMessages';
-import { useMarkRead } from '@/hooks/queries/useConversations';
+import {
+  useMarkRead,
+  useLeaveGroup,
+  useRemoveGroupMember,
+} from '@/hooks/queries/useConversations';
 import { useTyping } from '@/hooks/useTyping';
 import { useScrollMessages } from '@/hooks/useScrollMessages';
 import {
@@ -141,9 +147,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const deleteMessage = useDeleteMessage(convId);
   const toggleReaction = useToggleReaction(convId);
   const pinMessage = usePinMessage(convId);
-  // FIX: useForwardMessage is created with the active conversation's id as
-  // source. ForwardMessageModal now derives sourceConversationId from the
-  // message itself, so this is only used for the inline onForward callback.
   const forwardMessage = useForwardMessage(convId);
   const markRead = useMarkRead();
 
@@ -205,14 +208,11 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     e.target.value = '';
   };
 
-  // FIX: pass `replyingTo` through to the file send path so replies with
-  // attached files correctly set the replyTo context on the message.
   const handleFileSend = async (files: File[], caption: string) => {
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendMessage.mutateAsync({
       payload: {
         message: caption,
-        // FIX: was missing — replies with attachments now carry the context
         replyTo: replyingTo ?? undefined,
       },
       files,
@@ -220,8 +220,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     });
     setAttachments([]);
     setShowFilePreview(false);
-    // FIX: clear reply context after sending so it doesn't bleed into the
-    // next message
     setReplyingTo(null);
   };
 
@@ -450,11 +448,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
                       )}
                       currentUserId={user?.id ?? ''}
                       conversation={activeConversation}
-                      // FIX: reaction toggle goes via HTTP mutation (which also
-                      // updates the cache) — no separate socket emit needed here
-                      // because the socket handler on the server broadcasts
-                      // REACTION_UPDATED to the room, and SocketContext patches
-                      // the cache on receive.
                       onReaction={(emoji) =>
                         toggleReaction.mutate({
                           messageId: msg.id,
@@ -664,9 +657,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         }
       />
       <UndoToast conversationId={convId} />
-      {/* FIX: ForwardMessageModal now derives sourceConversationId from the
-          message itself, so multi-conversation forwarding works correctly even
-          when the message came from a different conversation (e.g. search). */}
       <ForwardMessageModal
         isOpen={!!forwardingMessage}
         onClose={() => setForwardingMessage(null)}
@@ -687,6 +677,21 @@ function GroupInfoPanel({
   currentUserId: string;
   onClose: () => void;
 }) {
+  const leaveGroup = useLeaveGroup();
+  const removeMember = useRemoveGroupMember(conversation.id);
+  const isAdmin = conversation.adminId === currentUserId;
+
+  const handleLeave = async () => {
+    if (!window.confirm('Are you sure you want to leave this group?')) return;
+    await leaveGroup.mutateAsync(conversation.id);
+    onClose();
+  };
+
+  const handleRemoveMember = async (userId: string, userName: string) => {
+    if (!window.confirm(`Remove ${userName} from the group?`)) return;
+    await removeMember.mutateAsync(userId);
+  };
+
   return (
     <motion.div
       initial={{ x: '100%', opacity: 0 }}
@@ -701,7 +706,9 @@ function GroupInfoPanel({
           <X className='h-5 w-5' />
         </Button>
       </div>
+
       <div className='flex-1 overflow-y-auto scrollbar-thin'>
+        {/* Group avatar + name */}
         <div className='flex flex-col items-center py-6 px-4 border-b border-border'>
           <Avatar className='h-20 w-20 mb-3'>
             <AvatarImage src={conversation.picture} />
@@ -716,6 +723,8 @@ function GroupInfoPanel({
             Group · {conversation.users.length} members
           </p>
         </div>
+
+        {/* Members list */}
         <div className='px-4 py-3'>
           <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3'>
             {conversation.users.length} members
@@ -727,7 +736,7 @@ function GroupInfoPanel({
               return (
                 <div
                   key={member.id}
-                  className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors'
+                  className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors group'
                 >
                   <div className='relative shrink-0'>
                     <Avatar className='h-10 w-10'>
@@ -751,11 +760,40 @@ function GroupInfoPanel({
                       {isMemberAdmin ? 'Admin' : member.status}
                     </p>
                   </div>
+                  {/* Admin can remove others (not themselves) */}
+                  {isAdmin && !isMe && (
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10'
+                      disabled={removeMember.isPending}
+                      onClick={() => handleRemoveMember(member.id, member.name)}
+                    >
+                      <UserMinus className='h-3.5 w-3.5' />
+                    </Button>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
+      </div>
+
+      {/* Leave group button */}
+      <div className='p-4 border-t border-border'>
+        <Button
+          variant='outline'
+          className='w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive gap-2'
+          disabled={leaveGroup.isPending}
+          onClick={handleLeave}
+        >
+          {leaveGroup.isPending ? (
+            <Loader2 className='h-4 w-4 animate-spin' />
+          ) : (
+            <LogOut className='h-4 w-4' />
+          )}
+          Leave group
+        </Button>
       </div>
     </motion.div>
   );
@@ -1005,9 +1043,6 @@ function MessageBubble({
             )}
           </div>
 
-          {/* FIX: reactions are toggled via the HTTP mutation which patches
-              the cache; the socket broadcasts REACTION_UPDATED to all room
-              members so everyone sees the change without a re-fetch. */}
           {message.reactions && message.reactions.length > 0 && (
             <MessageReactions
               reactions={message.reactions}

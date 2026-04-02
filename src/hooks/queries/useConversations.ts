@@ -118,7 +118,10 @@ export function useAddGroupMember(conversationId: string) {
     mutationFn: (userId: string) =>
       conversationService.addMember(conversationId, { userId }),
     onSuccess: (updated) => {
-      queryClient.setQueryData(conversationKeys.detail(conversationId), updated);
+      queryClient.setQueryData(
+        conversationKeys.detail(conversationId),
+        updated,
+      );
       queryClient.invalidateQueries({ queryKey: conversationKeys.all });
       toast.success('Member added');
     },
@@ -137,12 +140,42 @@ export function useRemoveGroupMember(conversationId: string) {
     mutationFn: (userId: string) =>
       conversationService.removeMember(conversationId, userId),
     onSuccess: (updated) => {
-      queryClient.setQueryData(conversationKeys.detail(conversationId), updated);
+      queryClient.setQueryData(
+        conversationKeys.detail(conversationId),
+        updated,
+      );
       queryClient.invalidateQueries({ queryKey: conversationKeys.all });
       toast.success('Member removed');
     },
     onError: (err: any) => {
       toast.error(err?.message ?? 'Failed to remove member');
+    },
+  });
+}
+
+// ─── useLeaveGroup ────────────────────────────────────────────────────────────
+
+export function useLeaveGroup() {
+  const queryClient = useQueryClient();
+  const { activeConversation, setActiveConversation } = useChatStore();
+
+  return useMutation({
+    mutationFn: (conversationId: string) =>
+      conversationService.leaveGroup(conversationId),
+    onSuccess: (_, conversationId) => {
+      // Remove the conversation from the sidebar list
+      queryClient.setQueryData<Conversation[]>(
+        conversationKeys.all,
+        (old = []) => old.filter((c) => c.id !== conversationId),
+      );
+      // Clear active conversation if it was the one we left
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation(null);
+      }
+      toast.success('You left the group');
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? 'Failed to leave group');
     },
   });
 }
