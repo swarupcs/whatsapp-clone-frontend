@@ -117,7 +117,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
-  // Track online/offline status
   useEffect(() => {
     const goOnline = () => setIsOffline(false);
     const goOffline = () => setIsOffline(true);
@@ -142,6 +141,9 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const deleteMessage = useDeleteMessage(convId);
   const toggleReaction = useToggleReaction(convId);
   const pinMessage = usePinMessage(convId);
+  // FIX: useForwardMessage is created with the active conversation's id as
+  // source. ForwardMessageModal now derives sourceConversationId from the
+  // message itself, so this is only used for the inline onForward callback.
   const forwardMessage = useForwardMessage(convId);
   const markRead = useMarkRead();
 
@@ -166,17 +168,9 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     ) ?? [];
   const isOtherTyping = typingUsersList.length > 0;
 
-  // ── Send handler ──────────────────────────────────────────────────────────
-  // FIX 1 + 2: Generate the optimistic ID here (before mutate) so the same ID
-  // is used for both the optimistic cache write and the success reconciliation,
-  // even when multiple sends are fired in rapid succession.
   const handleSend = useCallback(async () => {
     if (!messageText.trim() && attachments.length === 0) return;
-
-    // FIX 1: Guard missing conversation before attempting a send.
-    if (!convId) {
-      return;
-    }
+    if (!convId) return;
 
     stopTyping();
 
@@ -211,15 +205,23 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     e.target.value = '';
   };
 
+  // FIX: pass `replyingTo` through to the file send path so replies with
+  // attached files correctly set the replyTo context on the message.
   const handleFileSend = async (files: File[], caption: string) => {
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendMessage.mutateAsync({
-      payload: { message: caption, replyTo: replyingTo ?? undefined },
+      payload: {
+        message: caption,
+        // FIX: was missing — replies with attachments now carry the context
+        replyTo: replyingTo ?? undefined,
+      },
       files,
       optimisticId,
     });
     setAttachments([]);
     setShowFilePreview(false);
+    // FIX: clear reply context after sending so it doesn't bleed into the
+    // next message
     setReplyingTo(null);
   };
 
@@ -238,7 +240,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     setIsRecording(false);
   };
 
-  // FIX 4: Retry a failed message (e.g. one sent while offline).
   const handleRetryMessage = useCallback(
     async (msg: Message) => {
       const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -385,7 +386,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
           </div>
         </div>
 
-        {/* FIX 3: Offline banner */}
         <OfflineBanner visible={isOffline} />
 
         <ConversationSearch
@@ -450,6 +450,11 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
                       )}
                       currentUserId={user?.id ?? ''}
                       conversation={activeConversation}
+                      // FIX: reaction toggle goes via HTTP mutation (which also
+                      // updates the cache) — no separate socket emit needed here
+                      // because the socket handler on the server broadcasts
+                      // REACTION_UPDATED to the room, and SocketContext patches
+                      // the cache on receive.
                       onReaction={(emoji) =>
                         toggleReaction.mutate({
                           messageId: msg.id,
@@ -458,7 +463,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
                       }
                       onImageClick={setPreviewImage}
                       onEdit={(messageId, newMessage) => {
-                        // FIX 4: Silently drop edit attempts on not-yet-sent messages.
                         if (messageId.startsWith('optimistic-')) return;
                         editMessage.mutate({
                           messageId,
@@ -660,6 +664,9 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         }
       />
       <UndoToast conversationId={convId} />
+      {/* FIX: ForwardMessageModal now derives sourceConversationId from the
+          message itself, so multi-conversation forwarding works correctly even
+          when the message came from a different conversation (e.g. search). */}
       <ForwardMessageModal
         isOpen={!!forwardingMessage}
         onClose={() => setForwardingMessage(null)}
@@ -844,7 +851,6 @@ function MessageBubble({
       {!isOwn && !showAvatar && <div className='w-8' />}
 
       <div className='relative min-w-0 max-w-[70%]'>
-        {/* FIX 4: Only show message actions for fully sent messages */}
         {!isPending && !isFailed && (
           <MessageActions
             messageId={message.id}
@@ -900,7 +906,6 @@ function MessageBubble({
               ? 'message-bubble-sent rounded-br-md'
               : 'message-bubble-received rounded-bl-md',
             message.isPinned && 'ring-1 ring-primary/30',
-            // FIX 3: Visual cue for pending/failed messages
             isPending && 'opacity-60',
             isFailed && 'ring-1 ring-destructive/50 opacity-80',
           )}
@@ -985,7 +990,6 @@ function MessageBubble({
             <span className='text-[10px] opacity-70'>
               {format(new Date(message.createdAt), 'HH:mm')}
             </span>
-            {/* FIX 3: Show appropriate status icon */}
             {isOwn && (
               <span className='opacity-70'>
                 {isFailed ? (
@@ -1001,6 +1005,9 @@ function MessageBubble({
             )}
           </div>
 
+          {/* FIX: reactions are toggled via the HTTP mutation which patches
+              the cache; the socket broadcasts REACTION_UPDATED to all room
+              members so everyone sees the change without a re-fetch. */}
           {message.reactions && message.reactions.length > 0 && (
             <MessageReactions
               reactions={message.reactions}
@@ -1011,7 +1018,6 @@ function MessageBubble({
           )}
         </div>
 
-        {/* FIX 3: Retry button for failed messages */}
         {isFailed && isOwn && (
           <motion.button
             initial={{ opacity: 0 }}

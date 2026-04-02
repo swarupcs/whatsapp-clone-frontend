@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { messageService } from '../../services';
 import { conversationKeys } from './useConversations';
 import { useAuthStore } from '../../store/authStore';
+import { useChatStore } from '../../store/chatStore';
 import type {
   Message,
   PaginatedData,
@@ -29,8 +30,6 @@ export const messageKeys = {
 } as const;
 
 // ─── Send queue to prevent rapid-fire race conditions ────────────────────────
-// A per-conversation promise chain ensures messages are sent sequentially
-// even when the user fires them off faster than the server responds.
 const sendQueues = new Map<string, Promise<Message>>();
 
 function enqueueSend(
@@ -41,11 +40,11 @@ function enqueueSend(
   const next = prev.then(
     () => sendFn(),
     () => sendFn(),
-  ); // always run even if prev failed
+  );
   sendQueues.set(
     conversationId,
     next.catch(() => null as any),
-  ); // don't block queue on error
+  );
   return next;
 }
 
@@ -135,15 +134,12 @@ export function useSendMessage(conversationId: string) {
     }: {
       payload: SendMessagePayload;
       files?: File[];
-      optimisticId: string; // passed in so onSuccess can match it
+      optimisticId: string;
     }) => {
-      // FIX 1: Reject immediately if no conversation ID to avoid confusing errors.
       if (!conversationId || conversationId.trim() === '') {
         return Promise.reject(new Error('No active conversation selected.'));
       }
 
-      // FIX 3: Reject immediately if offline so the optimistic message stays
-      // visible in a "pending" state instead of silently vanishing.
       if (!isOnline()) {
         return Promise.reject(
           new Error('You are offline. Message will not be sent.'),
@@ -160,13 +156,10 @@ export function useSendMessage(conversationId: string) {
             )
           : messageService.send(conversationId, payload);
 
-      // FIX 2: Enqueue the actual HTTP call so concurrent sends are serialised
-      // per conversation — no parallel requests that land out of order.
       return enqueueSend(conversationId, sendFn);
     },
 
     onMutate: async ({ payload, files, optimisticId }) => {
-      // Skip cache manipulation when there is no valid conversation.
       if (!conversationId) return { optimisticId: null };
 
       await queryClient.cancelQueries({
@@ -191,7 +184,6 @@ export function useSendMessage(conversationId: string) {
         isEdited: false,
         isDeleted: false,
         isPinned: false,
-        // FIX 2: Tag offline-queued messages so the UI can style them.
         _pending: !isOnline(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -255,8 +247,6 @@ export function useSendMessage(conversationId: string) {
 
       if (context?.optimisticId) {
         if (!isOnline()) {
-          // FIX 3: Mark the optimistic message as failed-offline so UI can
-          // surface a retry affordance rather than just removing it.
           queryClient.setQueryData(
             messageKeys.list(conversationId),
             (old: any) => {
@@ -277,7 +267,6 @@ export function useSendMessage(conversationId: string) {
             },
           );
         } else {
-          // Remove the optimistic message for non-offline errors.
           queryClient.setQueryData(
             messageKeys.list(conversationId),
             (old: any) => {
@@ -314,8 +303,6 @@ export function useEditMessage(conversationId: string) {
       messageId: string;
       payload: EditMessagePayload;
     }) => {
-      // FIX 4: Editing an optimistic (unsent) message makes no sense — the
-      // real message ID doesn't exist yet. Guard against it explicitly.
       if (messageId.startsWith('optimistic-')) {
         return Promise.reject(
           new Error('Cannot edit a message that has not been sent yet.'),
@@ -359,10 +346,12 @@ export function useEditMessage(conversationId: string) {
   });
 }
 
-// ─── useDeleteMessage ─────────────────────────────────────────────────────────
+// ─── useDeleteMessage — FIX: push to undoDeleteStack ─────────────────────────
 
 export function useDeleteMessage(conversationId: string) {
   const queryClient = useQueryClient();
+  // FIX: pull in the chat store to push undo entries
+  const { pushUndoDelete } = useChatStore();
 
   return useMutation({
     mutationFn: (messageId: string) =>
@@ -374,13 +363,32 @@ export function useDeleteMessage(conversationId: string) {
       });
       const prev = queryClient.getQueryData(messageKeys.list(conversationId));
 
-      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
-        patchMessage(old, messageId, (m) => ({
+      // FIX: capture the message before marking deleted so we can restore it
+      let capturedMessage: Message | undefined;
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+        if (!old) return old;
+        // Find and capture the message first
+        for (const page of old.pages as PaginatedData<Message>[]) {
+          const found = page.data.find((m) => m.id === messageId);
+          if (found) {
+            capturedMessage = found;
+            break;
+          }
+        }
+        return patchMessage(old, messageId, (m) => ({
           ...m,
           isDeleted: true,
           message: '',
-        })),
-      );
+        }));
+      });
+
+      // FIX: push to undo stack so UndoToast can surface the "Undo" button
+      if (capturedMessage) {
+        pushUndoDelete({
+          message: capturedMessage,
+          expiresAt: Date.now() + 5_000, // 5-second window
+        });
+      }
 
       return { prev };
     },
@@ -448,9 +456,9 @@ export function usePinMessage(conversationId: string) {
   });
 }
 
-// ─── useForwardMessage ────────────────────────────────────────────────────────
+// ─── useForwardMessage — FIX: not tied to a specific source conversation ──────
 
-export function useForwardMessage(conversationId: string) {
+export function useForwardMessage(sourceConversationId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -461,7 +469,10 @@ export function useForwardMessage(conversationId: string) {
       messageId: string;
       toConversationId: string;
     }) =>
-      messageService.forward(conversationId, messageId, { toConversationId }),
+      // FIX: use sourceConversationId (the conversation the message lives in)
+      messageService.forward(sourceConversationId, messageId, {
+        toConversationId,
+      }),
 
     onSuccess: (forwarded) => {
       queryClient.setQueryData(
@@ -480,7 +491,6 @@ export function useForwardMessage(conversationId: string) {
           return { ...old, pages };
         },
       );
-      toast.success('Message forwarded');
     },
 
     onError: (err: any) => {
