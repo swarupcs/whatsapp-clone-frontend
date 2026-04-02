@@ -74,36 +74,66 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
   return (
     <div className='chat-sidebar'>
       <div className='h-16 px-4 flex items-center justify-between border-b border-border bg-card/50'>
-        <button onClick={() => navigate('/profile')} className='flex items-center gap-3 hover:opacity-80 transition-opacity'>
+        <button
+          onClick={() => navigate('/profile')}
+          className='flex items-center gap-3 hover:opacity-80 transition-opacity'
+        >
           <Avatar className='h-10 w-10 ring-2 ring-primary/20'>
             <AvatarImage src={user?.picture} />
             <AvatarFallback>{user?.name?.[0]}</AvatarFallback>
           </Avatar>
           <div className='hidden lg:block text-left'>
             <h3 className='font-semibold text-sm truncate'>{user?.name}</h3>
-            <p className='text-xs text-muted-foreground capitalize'>{user?.status}</p>
+            <p className='text-xs text-muted-foreground capitalize'>
+              {user?.status}
+            </p>
           </div>
         </button>
         <div className='flex items-center gap-1'>
-          <Button variant='ghost' size='icon' className='text-muted-foreground hover:text-foreground' onClick={() => setShowMessageSearch(true)}>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='text-muted-foreground hover:text-foreground'
+            onClick={() => setShowMessageSearch(true)}
+          >
             <FileSearch className='h-5 w-5' />
           </Button>
-          <Button variant='ghost' size='icon' className='text-muted-foreground hover:text-foreground' onClick={() => setShowUserSearch(true)}>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='text-muted-foreground hover:text-foreground'
+            onClick={() => setShowUserSearch(true)}
+          >
             <Plus className='h-5 w-5' />
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant='ghost' size='icon' className='text-muted-foreground hover:text-foreground'>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='text-muted-foreground hover:text-foreground'
+              >
                 <MoreVertical className='h-5 w-5' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-48'>
-              <DropdownMenuItem onClick={() => setShowCreateGroup(true)}><Users className='mr-2 h-4 w-4' /> New group</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowUserSearch(true)}><MessageCircle className='mr-2 h-4 w-4' /> New chat</DropdownMenuItem>
+            <DropdownMenuContent align='end' className='w-48 z-[200]'>
+              <DropdownMenuItem onClick={() => setShowCreateGroup(true)}>
+                <Users className='mr-2 h-4 w-4' /> New group
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowUserSearch(true)}>
+                <MessageCircle className='mr-2 h-4 w-4' /> New chat
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/settings')}><Settings className='mr-2 h-4 w-4' /> Settings</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/settings')}>
+                <Settings className='mr-2 h-4 w-4' /> Settings
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className='text-destructive'><LogOut className='mr-2 h-4 w-4' /> Log out</DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleLogout}
+                className='text-destructive'
+              >
+                <LogOut className='mr-2 h-4 w-4' /> Log out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -112,16 +142,27 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
       <div className='p-3'>
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
-          <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder='Search or start new chat' className='pl-10 h-10 bg-secondary border-0 rounded-lg' />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder='Search or start new chat'
+            className='pl-10 h-10 bg-secondary border-0 rounded-lg'
+          />
         </div>
       </div>
 
       <div className='px-3 pb-2 flex gap-2'>
         {(['all', 'unread', 'groups'] as const).map((f) => (
-          <Button key={f} variant={activeFilter === f ? 'secondary' : 'ghost'} size='sm'
-            className={cn('rounded-full text-xs h-7 px-3', activeFilter !== f && 'text-muted-foreground')}
-            onClick={() => setActiveFilter(f)}>
+          <Button
+            key={f}
+            variant={activeFilter === f ? 'secondary' : 'ghost'}
+            size='sm'
+            className={cn(
+              'rounded-full text-xs h-7 px-3',
+              activeFilter !== f && 'text-muted-foreground',
+            )}
+            onClick={() => setActiveFilter(f)}
+          >
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </Button>
         ))}
@@ -129,20 +170,36 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
 
       <div className='flex-1 overflow-y-auto scrollbar-thin'>
         {isLoading ? (
-          <div className='flex items-center justify-center h-32'><Loader2 className='h-6 w-6 animate-spin text-primary' /></div>
+          <div className='flex items-center justify-center h-32'>
+            <Loader2 className='h-6 w-6 animate-spin text-primary' />
+          </div>
         ) : (
           <AnimatePresence mode='popLayout'>
             {filtered.map((conv, index) => {
-              const otherUser = conv.isGroup ? null : conv.users.find((u) => u.id !== user?.id);
-              const isOnline = otherUser ? onlineUsers.includes(otherUser.id) : false;
+              const otherUser = conv.isGroup
+                ? null
+                : conv.users.find((u) => u.id !== user?.id);
+              const isOnline = otherUser
+                ? onlineUsers.includes(otherUser.id)
+                : false;
               const lastMessageSender = getLastMessageSender(conv);
               const preview = getLastMessagePreview(conv);
 
               return (
-                <motion.div key={conv.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }} transition={{ delay: index * 0.03 }}>
-                  <button onClick={() => handleConversationClick(conv)}
-                    className={cn('conversation-item w-full text-left', activeConversation?.id === conv.id && 'active')}>
+                <motion.div
+                  key={conv.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ delay: index * 0.03 }}
+                >
+                  <button
+                    onClick={() => handleConversationClick(conv)}
+                    className={cn(
+                      'conversation-item w-full text-left',
+                      activeConversation?.id === conv.id && 'active',
+                    )}
+                  >
                     <div className='relative shrink-0'>
                       <Avatar className='h-12 w-12'>
                         <AvatarImage src={conv.picture} />
@@ -159,17 +216,33 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                     </div>
                     <div className='flex-1 min-w-0'>
                       <div className='flex items-center justify-between mb-0.5'>
-                        <h4 className='font-medium text-sm truncate'>{conv.name}</h4>
+                        <h4 className='font-medium text-sm truncate'>
+                          {conv.name}
+                        </h4>
                         {conv.latestMessage && (
-                          <span className={cn('text-[11px] shrink-0 ml-2', conv.unreadCount > 0 ? 'text-primary font-medium' : 'text-muted-foreground')}>
+                          <span
+                            className={cn(
+                              'text-[11px] shrink-0 ml-2',
+                              conv.unreadCount > 0
+                                ? 'text-primary font-medium'
+                                : 'text-muted-foreground',
+                            )}
+                          >
                             {formatTime(conv.latestMessage.createdAt)}
                           </span>
                         )}
                       </div>
                       <div className='flex items-center gap-2'>
                         <p className='text-xs text-muted-foreground truncate flex-1'>
-                          {lastMessageSender && <span className='text-foreground/70'>{lastMessageSender}: </span>}
-                          {!lastMessageSender && conv.latestMessage?.senderId === user?.id && <span className='text-primary'>You: </span>}
+                          {lastMessageSender && (
+                            <span className='text-foreground/70'>
+                              {lastMessageSender}:{' '}
+                            </span>
+                          )}
+                          {!lastMessageSender &&
+                            conv.latestMessage?.senderId === user?.id && (
+                              <span className='text-primary'>You: </span>
+                            )}
                           {preview}
                         </p>
                         {conv.unreadCount > 0 && (
@@ -193,9 +266,15 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
         )}
       </div>
 
-      <CreateGroupModal open={showCreateGroup} onOpenChange={setShowCreateGroup} />
+      <CreateGroupModal
+        open={showCreateGroup}
+        onOpenChange={setShowCreateGroup}
+      />
       <UserSearchModal open={showUserSearch} onOpenChange={setShowUserSearch} />
-      <MessageSearchModal open={showMessageSearch} onOpenChange={setShowMessageSearch} />
+      <MessageSearchModal
+        open={showMessageSearch}
+        onOpenChange={setShowMessageSearch}
+      />
     </div>
   );
 }

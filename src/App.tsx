@@ -23,7 +23,9 @@ const queryClient = new QueryClient({
 function TokenSync() {
   const authToken = useAuthStore((s) => s.token);
   const setToken = useChatStore((s) => s.setToken);
-  useEffect(() => { setToken(authToken); }, [authToken, setToken]);
+  useEffect(() => {
+    setToken(authToken);
+  }, [authToken, setToken]);
   return null;
 }
 
@@ -51,21 +53,65 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return token ? <Navigate to='/' replace /> : <>{children}</>;
 }
 
+function DarkMode() {
+  useEffect(() => {
+    document.body.classList.add('dark');
+    return () => document.body.classList.remove('dark');
+  }, []);
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <SocketProvider>
       <TooltipProvider>
+        <DarkMode />
         <Toaster position='top-center' theme='dark' />
         <BrowserRouter>
           <TokenSync />
           <AuthExpiredListener />
           <div className='dark'>
             <Routes>
-              <Route path='/' element={<ProtectedRoute><Home /></ProtectedRoute>} />
-              <Route path='/login' element={<AuthRoute><Login /></AuthRoute>} />
-              <Route path='/register' element={<AuthRoute><Register /></AuthRoute>} />
-              <Route path='/profile' element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-              <Route path='/settings' element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route
+                path='/'
+                element={
+                  <ProtectedRoute>
+                    <Home />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path='/login'
+                element={
+                  <AuthRoute>
+                    <Login />
+                  </AuthRoute>
+                }
+              />
+              <Route
+                path='/register'
+                element={
+                  <AuthRoute>
+                    <Register />
+                  </AuthRoute>
+                }
+              />
+              <Route
+                path='/profile'
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path='/settings'
+                element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
               <Route path='*' element={<NotFound />} />
             </Routes>
           </div>
