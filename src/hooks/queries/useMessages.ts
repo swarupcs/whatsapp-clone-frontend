@@ -28,6 +28,33 @@ export const messageKeys = {
   globalSearch: (q: string) => ['messages', 'global-search', q] as const,
 } as const;
 
+// ─── Send queue to prevent rapid-fire race conditions ────────────────────────
+// A per-conversation promise chain ensures messages are sent sequentially
+// even when the user fires them off faster than the server responds.
+const sendQueues = new Map<string, Promise<Message>>();
+
+function enqueueSend(
+  conversationId: string,
+  sendFn: () => Promise<Message>,
+): Promise<Message> {
+  const prev = sendQueues.get(conversationId) ?? Promise.resolve(null as any);
+  const next = prev.then(
+    () => sendFn(),
+    () => sendFn(),
+  ); // always run even if prev failed
+  sendQueues.set(
+    conversationId,
+    next.catch(() => null as any),
+  ); // don't block queue on error
+  return next;
+}
+
+// ─── Offline detection helper ─────────────────────────────────────────────────
+
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
 // ─── useMessages (infinite scroll) ───────────────────────────────────────────
 
 export function useMessages(conversationId: string) {
@@ -44,7 +71,7 @@ export function useMessages(conversationId: string) {
     select: (data) => ({
       ...data,
       messages: deduplicateMessages(
-        data.pages.flatMap((p) => p.data ?? []), // ✅ Correct
+        data.pages.flatMap((p) => p.data ?? []),
       ).sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -104,25 +131,48 @@ export function useSendMessage(conversationId: string) {
     mutationFn: ({
       payload,
       files,
+      optimisticId,
     }: {
       payload: SendMessagePayload;
       files?: File[];
-    }) =>
-      files && files.length > 0
-        ? messageService.sendWithFiles(
-            conversationId,
-            payload.message,
-            files,
-            payload.replyTo,
-          )
-        : messageService.send(conversationId, payload),
+      optimisticId: string; // passed in so onSuccess can match it
+    }) => {
+      // FIX 1: Reject immediately if no conversation ID to avoid confusing errors.
+      if (!conversationId || conversationId.trim() === '') {
+        return Promise.reject(new Error('No active conversation selected.'));
+      }
 
-    onMutate: async ({ payload, files }) => {
+      // FIX 3: Reject immediately if offline so the optimistic message stays
+      // visible in a "pending" state instead of silently vanishing.
+      if (!isOnline()) {
+        return Promise.reject(
+          new Error('You are offline. Message will not be sent.'),
+        );
+      }
+
+      const sendFn = () =>
+        files && files.length > 0
+          ? messageService.sendWithFiles(
+              conversationId,
+              payload.message,
+              files,
+              payload.replyTo,
+            )
+          : messageService.send(conversationId, payload);
+
+      // FIX 2: Enqueue the actual HTTP call so concurrent sends are serialised
+      // per conversation — no parallel requests that land out of order.
+      return enqueueSend(conversationId, sendFn);
+    },
+
+    onMutate: async ({ payload, files, optimisticId }) => {
+      // Skip cache manipulation when there is no valid conversation.
+      if (!conversationId) return { optimisticId: null };
+
       await queryClient.cancelQueries({
         queryKey: messageKeys.list(conversationId),
       });
 
-      const optimisticId = `optimistic-${Date.now()}-${Math.random()}`;
       const optimistic: Message = {
         id: optimisticId,
         conversationId,
@@ -141,9 +191,11 @@ export function useSendMessage(conversationId: string) {
         isEdited: false,
         isDeleted: false,
         isPinned: false,
+        // FIX 2: Tag offline-queued messages so the UI can style them.
+        _pending: !isOnline(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      };
+      } as Message;
 
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
         if (!old) {
@@ -163,28 +215,25 @@ export function useSendMessage(conversationId: string) {
 
         const pages = [...old.pages];
         const last = pages[pages.length - 1];
-        // Guard: last.data may be undefined if the page hasn't resolved yet
         const prevData: Message[] = Array.isArray(last?.data) ? last.data : [];
         pages[pages.length - 1] = { ...last, data: [...prevData, optimistic] };
         return { ...old, pages };
       });
 
-      // FIX: must return optimisticId so onSuccess/onError context is defined
       return { optimisticId };
     },
 
     onSuccess: (sent, _vars, context) => {
+      if (!context?.optimisticId) return;
+
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
         if (!old) return old;
         return {
           ...old,
           pages: old.pages.map((page: PaginatedData<Message>) => ({
             ...page,
-            // FIX: guard page.data before mapping
             data: Array.isArray(page.data)
-              ? page.data.map((m) =>
-                  m.id === context?.optimisticId ? sent : m,
-                )
+              ? page.data.map((m) => (m.id === context.optimisticId ? sent : m))
               : [],
           })),
         };
@@ -201,26 +250,53 @@ export function useSendMessage(conversationId: string) {
       );
     },
 
-    onError: (_err, _vars, context) => {
+    onError: (err: any, vars, context) => {
+      const errorMessage: string = err?.message ?? 'Failed to send message';
+
       if (context?.optimisticId) {
-        queryClient.setQueryData(
-          messageKeys.list(conversationId),
-          (old: any) => {
-            if (!old) return old;
-            return {
-              ...old,
-              pages: old.pages.map((page: PaginatedData<Message>) => ({
-                ...page,
-                // FIX: guard page.data before filtering
-                data: Array.isArray(page.data)
-                  ? page.data.filter((m) => m.id !== context.optimisticId)
-                  : [],
-              })),
-            };
-          },
-        );
+        if (!isOnline()) {
+          // FIX 3: Mark the optimistic message as failed-offline so UI can
+          // surface a retry affordance rather than just removing it.
+          queryClient.setQueryData(
+            messageKeys.list(conversationId),
+            (old: any) => {
+              if (!old) return old;
+              return {
+                ...old,
+                pages: old.pages.map((page: PaginatedData<Message>) => ({
+                  ...page,
+                  data: Array.isArray(page.data)
+                    ? page.data.map((m) =>
+                        m.id === context.optimisticId
+                          ? { ...m, _failed: true, _failedReason: 'offline' }
+                          : m,
+                      )
+                    : [],
+                })),
+              };
+            },
+          );
+        } else {
+          // Remove the optimistic message for non-offline errors.
+          queryClient.setQueryData(
+            messageKeys.list(conversationId),
+            (old: any) => {
+              if (!old) return old;
+              return {
+                ...old,
+                pages: old.pages.map((page: PaginatedData<Message>) => ({
+                  ...page,
+                  data: Array.isArray(page.data)
+                    ? page.data.filter((m) => m.id !== context.optimisticId)
+                    : [],
+                })),
+              };
+            },
+          );
+        }
       }
-      toast.error('Failed to send message');
+
+      toast.error(errorMessage);
     },
   });
 }
@@ -237,7 +313,16 @@ export function useEditMessage(conversationId: string) {
     }: {
       messageId: string;
       payload: EditMessagePayload;
-    }) => messageService.edit(conversationId, messageId, payload),
+    }) => {
+      // FIX 4: Editing an optimistic (unsent) message makes no sense — the
+      // real message ID doesn't exist yet. Guard against it explicitly.
+      if (messageId.startsWith('optimistic-')) {
+        return Promise.reject(
+          new Error('Cannot edit a message that has not been sent yet.'),
+        );
+      }
+      return messageService.edit(conversationId, messageId, payload);
+    },
 
     onMutate: async ({ messageId, payload }) => {
       await queryClient.cancelQueries({
@@ -262,13 +347,14 @@ export function useEditMessage(conversationId: string) {
       );
     },
 
-    onError: (_err, _vars, context) => {
+    onError: (err: any, vars, context) => {
       if (context?.prev)
         queryClient.setQueryData(
           messageKeys.list(conversationId),
           context.prev,
         );
-      toast.error('Failed to edit message');
+      const msg = err?.message ?? 'Failed to edit message';
+      toast.error(msg);
     },
   });
 }
@@ -384,7 +470,6 @@ export function useForwardMessage(conversationId: string) {
           if (!old) return old;
           const pages = [...old.pages];
           const last = pages[pages.length - 1];
-          // FIX: guard last.data before spreading
           const prevData: Message[] = Array.isArray(last?.data)
             ? last.data
             : [];
@@ -433,7 +518,6 @@ function patchMessage(
     ...old,
     pages: old.pages.map((page: PaginatedData<Message>) => ({
       ...page,
-      // FIX: guard page.data — may be undefined during optimistic updates
       data: Array.isArray(page.data)
         ? page.data.map((m) => (m.id === messageId ? updater(m) : m))
         : [],
