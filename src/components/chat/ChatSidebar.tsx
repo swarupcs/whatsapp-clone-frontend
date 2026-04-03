@@ -2,39 +2,65 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Search, MoreVertical, MessageCircle, Users, Settings, LogOut, Plus, FileSearch, Loader2 } from 'lucide-react';
+import {
+  Search,
+  MoreVertical,
+  MessageCircle,
+  Users,
+  Settings,
+  LogOut,
+  Plus,
+  FileSearch,
+  Loader2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
-import { useConversations, useMarkRead } from '@/hooks/queries/useConversations';
+import {
+  useConversations,
+  useMarkRead,
+} from '@/hooks/queries/useConversations';
 import { useLogout } from '@/hooks/queries/useAuth';
 import CreateGroupModal from './CreateGroupModal';
 import UserSearchModal from './UserSearchModal';
 import MessageSearchModal from './MessageSearchModal';
 import type { Conversation } from '@/types';
 
-interface Props { onConversationSelect?: () => void; }
+interface Props {
+  onConversationSelect?: () => void;
+}
 
 export default function ChatSidebar({ onConversationSelect }: Props) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'groups'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'groups'>(
+    'all',
+  );
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
 
   const { user } = useAuthStore();
-  const { activeConversation, setActiveConversation, onlineUsers } = useChatStore();
+  const { activeConversation, setActiveConversation, onlineUsers } =
+    useChatStore();
   const { data: conversations = [], isLoading } = useConversations();
   const logoutMutation = useLogout();
   const markRead = useMarkRead();
 
   const filtered = conversations.filter((conv) => {
-    const matchesSearch = conv.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = conv.name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
     if (activeFilter === 'unread') return conv.unreadCount > 0;
     if (activeFilter === 'groups') return conv.isGroup;
@@ -54,12 +80,19 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
     return format(date, 'dd/MM/yy');
   };
 
-  const handleLogout = async () => { await logoutMutation.mutateAsync(); navigate('/login'); };
+  const handleLogout = async () => {
+    await logoutMutation.mutateAsync();
+    navigate('/login');
+  };
 
   const getLastMessagePreview = (conv: Conversation): string => {
     if (!conv.latestMessage) return 'Start a conversation';
     if (conv.latestMessage.isDeleted) return 'This message was deleted';
-    if (conv.latestMessage.files && conv.latestMessage.files.length > 0 && !conv.latestMessage.message)
+    if (
+      conv.latestMessage.files &&
+      conv.latestMessage.files.length > 0 &&
+      !conv.latestMessage.message
+    )
       return `📎 ${conv.latestMessage.files.length} attachment${conv.latestMessage.files.length > 1 ? 's' : ''}`;
     return conv.latestMessage.message || 'Start a conversation';
   };
@@ -67,7 +100,9 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
   const getLastMessageSender = (conv: Conversation): string | null => {
     if (!conv.latestMessage || !conv.isGroup) return null;
     if (conv.latestMessage.senderId === user?.id) return 'You';
-    const sender = conv.users.find((u) => u.id === conv.latestMessage?.senderId);
+    const sender = conv.users.find(
+      (u) => u.id === conv.latestMessage?.senderId,
+    );
     return sender?.name.split(' ')[0] ?? null;
   };
 
@@ -116,7 +151,7 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                 <MoreVertical className='h-5 w-5' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-48 z-[200]'>
+            <DropdownMenuContent align='end' className='w-48'>
               <DropdownMenuItem onClick={() => setShowCreateGroup(true)}>
                 <Users className='mr-2 h-4 w-4' /> New group
               </DropdownMenuItem>
@@ -130,7 +165,7 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
-                className='text-destructive'
+                className='text-destructive focus:text-destructive'
               >
                 <LogOut className='mr-2 h-4 w-4' /> Log out
               </DropdownMenuItem>
