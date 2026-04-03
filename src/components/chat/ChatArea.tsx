@@ -863,6 +863,11 @@ function MessageBubble({
     (u) => u.id !== currentUserId,
   ).length;
 
+  // Keep action elements visible if reaction picker is open,
+  // same pattern as MessageActions — prevents onMouseLeave from
+  // destroying the picker before the user can click a reaction.
+  const shouldShowActions = isHovered || showReactionPicker;
+
   return (
     <motion.div
       id={`message-${message.id}`}
@@ -877,7 +882,8 @@ function MessageBubble({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false);
-        setShowReactionPicker(false);
+        // Do NOT close showReactionPicker here — let the picker
+        // close itself via its own onClose callback
       }}
     >
       {!isOwn && showAvatar && (
@@ -906,12 +912,12 @@ function MessageBubble({
         )}
 
         <AnimatePresence>
-          {isHovered && !isPending && !isFailed && (
+          {shouldShowActions && !isPending && !isFailed && (
             <motion.button
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              onClick={() => setShowReactionPicker(!showReactionPicker)}
+              onClick={() => setShowReactionPicker((prev) => !prev)}
               className={cn(
                 'absolute top-1/2 -translate-y-1/2 h-7 w-7 flex items-center justify-center rounded-full bg-card border border-border shadow-sm hover:bg-muted z-10',
                 isOwn ? '-left-9' : '-right-9',
@@ -925,7 +931,10 @@ function MessageBubble({
         <AnimatePresence>
           {showReactionPicker && (
             <ReactionPicker
-              onSelect={onReaction}
+              onSelect={(emoji) => {
+                onReaction(emoji);
+                setShowReactionPicker(false);
+              }}
               onClose={() => setShowReactionPicker(false)}
             />
           )}
