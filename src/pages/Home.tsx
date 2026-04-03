@@ -12,7 +12,7 @@ export default function Home() {
 
   return (
     <div className='chat-layout'>
-      <NotificationPermission />
+      {/* <NotificationPermission /> */}
       <IncomingCallModal />
       <div className={cn('w-full lg:w-auto', showChat && activeConversation ? 'hidden lg:flex' : 'flex')}>
         <ChatSidebar onConversationSelect={() => setShowChat(true)} />
