@@ -26,7 +26,7 @@ interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 export default function MessageSearchModal({ open, onOpenChange }: Props) {
   const [inputValue, setInputValue] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { user } = useAuthStore();
   const { setActiveConversation } = useChatStore();
   const { data: conversations = [] } = useConversations();
@@ -35,7 +35,7 @@ export default function MessageSearchModal({ open, onOpenChange }: Props) {
 
   const handleQueryChange = (q: string) => {
     setInputValue(q);
-    clearTimeout(debounceRef.current);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDebouncedQuery(q), 350);
   };
 

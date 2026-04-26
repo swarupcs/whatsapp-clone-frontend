@@ -1,4 +1,4 @@
-import type { User } from "@/store/chatStore";
+import type { User } from "@/types";
 
 
 type EventCallback = (data: any) => void;
@@ -21,6 +21,8 @@ const mockUsers: User[] = [
     picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=jane',
     status: 'online',
     about: 'Available',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
   {
     id: '3',
@@ -29,6 +31,8 @@ const mockUsers: User[] = [
     picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=mike',
     status: 'online',
     about: 'Busy',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
   {
     id: '5',
@@ -37,6 +41,8 @@ const mockUsers: User[] = [
     picture: 'https://api.dicebear.com/7.x/avataaars/svg?seed=alex',
     status: 'online',
     about: 'Hello!',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
 ];
 
@@ -56,7 +62,7 @@ const randomMessages = [
 class SocketSimulator implements SimulatedSocket {
   connected = false;
   private eventListeners: Map<string, Set<EventCallback>> = new Map();
-  private intervals: NodeJS.Timeout[] = [];
+  private intervals: ReturnType<typeof setInterval>[] = [];
   private currentUserId: string = '';
 
   connect() {

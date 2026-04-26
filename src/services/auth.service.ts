@@ -36,18 +36,17 @@ export const authService = {
 
   /**
    * POST /auth/refresh
-   * Exchanges a refresh token for a new access + refresh pair.
-   * NOTE: This is also called internally by the axios interceptor.
+   * Exchanges a refresh token for a new access pair via HTTP-only cookie.
    */
-  refresh: (refreshToken: string): Promise<AuthTokens> =>
-    http.post<AuthTokens>('/auth/refresh', { refreshToken }),
+  refresh: (): Promise<AuthTokens> =>
+    http.post<AuthTokens>('/auth/refresh', {}),
 
   /**
    * POST /auth/logout
-   * Invalidates the refresh token server-side.
+   * Invalidates the refresh token server-side via HTTP-only cookie.
    */
-  logout: (refreshToken: string): Promise<null> =>
-    http.post<null>('/auth/logout', { refreshToken }),
+  logout: (): Promise<null> =>
+    http.post<null>('/auth/logout', {}),
 
   /**
    * GET /auth/me

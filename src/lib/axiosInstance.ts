@@ -33,15 +33,16 @@ function flushQueue(token: string | null): void {
 }
 
 async function attemptTokenRefresh(): Promise<string | null> {
-  const refreshToken = tokenStorage.getRefresh();
-  if (!refreshToken) return null;
-
   try {
-    // Use a raw axios call (not the intercepted instance) to avoid loops
-    const res = await axios.post<ApiResponse<{ accessToken: string; refreshToken: string }>>(
+    // Use a raw axios call (not the intercepted instance) to avoid loops.
+    // withCredentials: true ensures the browser automatically attaches the HttpOnly refreshToken cookie.
+    const res = await axios.post<ApiResponse<{ accessToken: string }>>(
       `${BASE_URL}/auth/refresh`,
-      { refreshToken },
-      { headers: { 'Content-Type': 'application/json' } },
+      {},
+      { 
+        headers: { 'Content-Type': 'application/json' },
+        withCredentials: true 
+      },
     );
 
     const data = res.data;
@@ -50,7 +51,7 @@ async function attemptTokenRefresh(): Promise<string | null> {
       return null;
     }
 
-    tokenStorage.setTokens(data.data.accessToken, data.data.refreshToken);
+    tokenStorage.setAccess(data.data.accessToken);
     return data.data.accessToken;
   } catch {
     tokenStorage.clearTokens();
@@ -63,6 +64,7 @@ async function attemptTokenRefresh(): Promise<string | null> {
 const axiosInstance: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: 30_000,
+  withCredentials: true, // Crucial: Send cookies on every cross-origin request
   headers: {
     'Content-Type': 'application/json',
   },

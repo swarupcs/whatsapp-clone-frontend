@@ -32,10 +32,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (payload: LoginPayload) => authService.login(payload),
     onSuccess: (result) => {
-      tokenStorage.setTokens(
-        result.tokens.accessToken,
-        result.tokens.refreshToken,
-      );
+      tokenStorage.setAccess(result.tokens.accessToken);
       setAuth(result.user, result.tokens.accessToken);
       queryClient.setQueryData(authKeys.me, result.user);
       toast.success(`Welcome back, ${result.user.name}!`);
@@ -45,7 +42,6 @@ export function useLogin() {
     },
   });
 }
-
 // ─── useRegister ──────────────────────────────────────────────────────────────
 
 export function useRegister() {
@@ -55,10 +51,7 @@ export function useRegister() {
   return useMutation({
     mutationFn: (payload: RegisterPayload) => authService.register(payload),
     onSuccess: (result) => {
-      tokenStorage.setTokens(
-        result.tokens.accessToken,
-        result.tokens.refreshToken,
-      );
+      tokenStorage.setAccess(result.tokens.accessToken);
       setAuth(result.user, result.tokens.accessToken);
       queryClient.setQueryData(authKeys.me, result.user);
       toast.success('Account created successfully!');
@@ -76,10 +69,7 @@ export function useLogout() {
   const { clearAuth } = useAuthStore();
 
   return useMutation({
-    mutationFn: () => {
-      const refresh = tokenStorage.getRefresh();
-      return refresh ? authService.logout(refresh) : Promise.resolve(null);
-    },
+    mutationFn: () => authService.logout(),
     onSettled: () => {
       tokenStorage.clearTokens();
       clearAuth();

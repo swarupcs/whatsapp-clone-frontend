@@ -31,6 +31,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
+import { useCallStore } from '@/store/callStore';
 import {
   useMessages,
   useSendMessage,
@@ -641,18 +642,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         onClose={() => setPreviewImage(null)}
         imageUrl={previewImage?.url ?? ''}
         imageName={previewImage?.name ?? ''}
-      />
-      <VideoCallModal
-        isOpen={showVideoCall}
-        onClose={() => setShowVideoCall(false)}
-        contactName={activeConversation.name}
-        contactAvatar={activeConversation.picture}
-      />
-      <AudioCallModal
-        isOpen={showAudioCall}
-        onClose={() => setShowAudioCall(false)}
-        contactName={activeConversation.name}
-        contactAvatar={activeConversation.picture}
       />
       <FilePreviewScreen
         isOpen={showFilePreview}
