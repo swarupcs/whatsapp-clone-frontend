@@ -121,7 +121,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     const socket = connectSocket();
 
-    socket.on(SOCKET_EVENTS.CONNECT, () => setConnected(true));
+    socket.on(SOCKET_EVENTS.CONNECT, () => {
+      setConnected(true);
+
+      // If we just reconnected, we might have missed messages while offline.
+      // Invalidate caches to silently fetch the latest data from the REST API.
+      queryClient.invalidateQueries({ queryKey: conversationKeys.all });
+      if (activeConversationRef.current?.id) {
+        queryClient.invalidateQueries({
+          queryKey: messageKeys.list(activeConversationRef.current.id),
+        });
+      }
+    });
     socket.on(SOCKET_EVENTS.DISCONNECT, () => setConnected(false));
     socket.on(SOCKET_EVENTS.CONNECT_ERROR, () => setConnected(false));
 
