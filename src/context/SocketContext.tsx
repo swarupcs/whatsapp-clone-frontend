@@ -10,6 +10,7 @@ import { useChatStore } from '../store/chatStore';
 import { useCallStore } from '../store/callStore';
 import { messageKeys } from '../hooks/queries/useMessages';
 import { conversationKeys } from '../hooks/queries/useConversations';
+import { useOnlineUsers } from '../hooks/queries/useUsers';
 import type {
   Message, Conversation, NewMessagePayload, ReactionUpdatedPayload,
   MessageSeenPayload, PinPayload, IncomingCallPayload, TypingPayload, PaginatedData,
@@ -102,6 +103,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
   const userIdRef = useRef<string | undefined>(user?.id);
   useEffect(() => { userIdRef.current = user?.id; });
+
+  // FIX: Utilize the HTTP polling hook to supplement socket presence
+  const { data: httpOnlineUserIds } = useOnlineUsers();
+  useEffect(() => {
+    if (httpOnlineUserIds && httpOnlineUserIds.length > 0) {
+      // Merge HTTP polling data with whatever socket data we already have
+      const currentOnline = useChatStore.getState().onlineUsers;
+      const merged = Array.from(new Set([...currentOnline, ...httpOnlineUserIds]));
+      if (merged.length !== currentOnline.length) {
+        setOnlineUsers(merged);
+      }
+    }
+  }, [httpOnlineUserIds, setOnlineUsers]);
 
   useEffect(() => {
     if (!token || !user) { disconnectSocket(); setConnected(false); return; }
