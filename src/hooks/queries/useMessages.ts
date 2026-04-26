@@ -294,86 +294,69 @@ export function useSendMessage(conversationId: string) {
 
 export function useEditMessage(conversationId: string) {
   const queryClient = useQueryClient();
+  const { pushUndoEdit } = useChatStore();
 
-  return useMutation({
-    mutationFn: ({
-      messageId,
-      payload,
-    }: {
-      messageId: string;
-      payload: EditMessagePayload;
-    }) => {
+  return {
+    mutate: ({ messageId, payload }: { messageId: string; payload: EditMessagePayload }) => {
       if (messageId.startsWith('optimistic-')) {
-        return Promise.reject(
-          new Error('Cannot edit a message that has not been sent yet.'),
-        );
+        toast.error('Cannot edit a message that has not been sent yet.');
+        return;
       }
-      return messageService.edit(conversationId, messageId, payload);
-    },
 
-    onMutate: async ({ messageId, payload }) => {
-      await queryClient.cancelQueries({
-        queryKey: messageKeys.list(conversationId),
-      });
-      const prev = queryClient.getQueryData(messageKeys.list(conversationId));
-
-      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
-        patchMessage(old, messageId, (m) => ({
+      let originalMessage = '';
+      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+        if (!old) return old;
+        for (const page of old.pages as PaginatedData<Message>[]) {
+          const found = page.data.find((m) => m.id === messageId);
+          if (found) { originalMessage = found.message; break; }
+        }
+        return patchMessage(old, messageId, (m) => ({
           ...m,
           message: payload.message,
           isEdited: true,
-        })),
-      );
+        }));
+      });
 
-      return { prev };
-    },
+      if (originalMessage) {
+        pushUndoEdit({
+          conversationId,
+          messageId,
+          originalMessage,
+          newMessage: payload.message,
+          expiresAt: Date.now() + 5000,
+        });
 
-    onSuccess: (updated) => {
-      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
-        patchMessage(old, updated.id, () => updated),
-      );
+        setTimeout(() => {
+          const entry = useChatStore.getState().popUndoEdit(messageId);
+          if (entry) {
+            messageService.edit(conversationId, messageId, payload).catch((err) => {
+              toast.error(err?.message ?? 'Failed to edit message');
+              queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+                patchMessage(old, messageId, (m) => ({ ...m, message: originalMessage }))
+              );
+            });
+          }
+        }, 5000);
+      }
     },
-
-    onError: (err: any, vars, context) => {
-      if (context?.prev)
-        queryClient.setQueryData(
-          messageKeys.list(conversationId),
-          context.prev,
-        );
-      const msg = err?.message ?? 'Failed to edit message';
-      toast.error(msg);
-    },
-  });
+  };
 }
 
 // ─── useDeleteMessage — FIX: push to undoDeleteStack ─────────────────────────
 
 export function useDeleteMessage(conversationId: string) {
   const queryClient = useQueryClient();
-  // FIX: pull in the chat store to push undo entries
   const { pushUndoDelete } = useChatStore();
 
-  return useMutation({
-    mutationFn: (messageId: string) =>
-      messageService.delete(conversationId, messageId),
-
-    onMutate: async (messageId) => {
-      await queryClient.cancelQueries({
-        queryKey: messageKeys.list(conversationId),
-      });
-      const prev = queryClient.getQueryData(messageKeys.list(conversationId));
-
-      // FIX: capture the message before marking deleted so we can restore it
+  return {
+    mutate: (messageId: string) => {
       let capturedMessage: Message | undefined;
+
       queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
         if (!old) return old;
-        // Find and capture the message first
         for (const page of old.pages as PaginatedData<Message>[]) {
           const found = page.data.find((m) => m.id === messageId);
-          if (found) {
-            capturedMessage = found;
-            break;
-          }
+          if (found) { capturedMessage = found; break; }
         }
         return patchMessage(old, messageId, (m) => ({
           ...m,
@@ -382,26 +365,27 @@ export function useDeleteMessage(conversationId: string) {
         }));
       });
 
-      // FIX: push to undo stack so UndoToast can surface the "Undo" button
       if (capturedMessage) {
         pushUndoDelete({
+          conversationId,
           message: capturedMessage,
-          expiresAt: Date.now() + 5_000, // 5-second window
+          expiresAt: Date.now() + 5000,
         });
+
+        setTimeout(() => {
+          const entry = useChatStore.getState().popUndoDelete(messageId);
+          if (entry) {
+            messageService.delete(conversationId, messageId).catch(() => {
+              toast.error('Failed to delete message');
+              queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
+                patchMessage(old, messageId, () => entry.message)
+              );
+            });
+          }
+        }, 5000);
       }
-
-      return { prev };
     },
-
-    onError: (_err, _vars, context) => {
-      if (context?.prev)
-        queryClient.setQueryData(
-          messageKeys.list(conversationId),
-          context.prev,
-        );
-      toast.error('Failed to delete message');
-    },
-  });
+  };
 }
 
 // ─── useToggleReaction ────────────────────────────────────────────────────────
@@ -518,7 +502,7 @@ export function useMarkSeen(conversationId: string) {
 
 // ─── Private helper ───────────────────────────────────────────────────────────
 
-function patchMessage(
+export function patchMessage(
   old: any,
   messageId: string,
   updater: (m: Message) => Message,

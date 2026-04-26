@@ -3,13 +3,16 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type { Conversation, Message } from '../types';
 
 export interface UndoDeleteEntry {
+  conversationId: string;
   message: Message;
   expiresAt: number;
 }
 
 export interface UndoEditEntry {
+  conversationId: string;
   messageId: string;
   originalMessage: string;
+  newMessage: string;
   expiresAt: number;
 }
 
