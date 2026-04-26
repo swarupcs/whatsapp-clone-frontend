@@ -1,3 +1,5 @@
+import { setActiveConversation } from '@/store/slices/chatSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, MessageCircle, ArrowRight, Loader2 } from 'lucide-react';
@@ -7,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/store/authStore';
-import { useChatStore } from '@/store/chatStore';
+
+
 import { useGlobalMessageSearch } from '@/hooks/queries/useMessages';
 import { useConversations, useMarkRead } from '@/hooks/queries/useConversations';
 import type { Message } from '@/types';
@@ -24,11 +26,13 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 
 export default function MessageSearchModal({ open, onOpenChange }: Props) {
+  const dispatch = useAppDispatch();
+
   const [inputValue, setInputValue] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { user } = useAuthStore();
-  const { setActiveConversation } = useChatStore();
+  const user = useAppSelector((state) => state.auth.user);
+  
   const { data: conversations = [] } = useConversations();
   const markRead = useMarkRead();
   const { data: messages = [], isFetching } = useGlobalMessageSearch(debouncedQuery);
@@ -49,7 +53,7 @@ export default function MessageSearchModal({ open, onOpenChange }: Props) {
   const handleResultClick = (convId: string, messageId: string) => {
     const conv = conversations.find((c) => c.id === convId);
     if (!conv) return;
-    setActiveConversation(conv);
+    dispatch(setActiveConversation(conv));
     markRead.mutate(convId);
     onOpenChange(false);
     setInputValue(''); setDebouncedQuery('');

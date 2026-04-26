@@ -1,3 +1,5 @@
+import { setActiveConversation } from '@/store/slices/chatSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -24,8 +26,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/store/authStore';
-import { useChatStore } from '@/store/chatStore';
+
+
 import {
   useConversations,
   useMarkRead,
@@ -50,9 +52,11 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
 
-  const { user } = useAuthStore();
-  const { activeConversation, setActiveConversation, onlineUsers } =
-    useChatStore();
+  const user = useAppSelector((state) => state.auth.user);
+  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
+  const onlineUsers = useAppSelector((state) => state.chat.onlineUsers);
+  const dispatch = useAppDispatch();
+
   const { data: conversations = [], isLoading } = useConversations();
   const logoutMutation = useLogout();
   const markRead = useMarkRead();

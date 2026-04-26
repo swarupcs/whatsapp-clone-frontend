@@ -1,3 +1,4 @@
+import { useAppSelector } from '@/store';
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,14 +12,14 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { useAuthStore } from '@/store/authStore';
+
 import { useMe, useLogout } from '@/hooks/queries/useAuth';
 import { useUpdateProfile, useUpdateStatus } from '@/hooks/queries/useUsers';
 import type { UserStatus } from '@/types';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const user = useAppSelector((state) => state.auth.user);
   const { data: meData } = useMe();
   const currentUser = meData ?? user;
   const updateProfileMutation = useUpdateProfile();

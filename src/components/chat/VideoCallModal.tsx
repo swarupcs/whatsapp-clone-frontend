@@ -1,16 +1,26 @@
+import { store } from '@/store';
+import { resetCall } from '@/store/slices/callSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Mic, MicOff, Video, VideoOff, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { useCallStore } from '@/store/callStore';
+
 import { socketEmit } from '@/lib/socket';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 
-export default function VideoCallModal() {
-  const { callStatus, callType, caller, receiver, callDuration, localStream, remoteStream, resetCall, isIncomingCall } = useCallStore();
+export default function VideoCallModal({ localStream, remoteStream }: { localStream?: MediaStream | null, remoteStream?: MediaStream | null }) {
+  const dispatch = useAppDispatch();
+
+  const callStatus = useAppSelector((state) => state.call.callStatus);
+  const callType = useAppSelector((state) => state.call.callType);
+  const caller = useAppSelector((state) => state.call.caller);
+  const receiver = useAppSelector((state) => state.call.receiver);
+  const callDuration = useAppSelector((state) => state.call.callDuration);
+      const isIncomingCall = useAppSelector((state) => state.call.isIncomingCall);
   const contact = isIncomingCall ? caller : receiver;
   const isOpen = callStatus !== 'idle' && callType === 'video';
 
@@ -36,24 +46,24 @@ export default function VideoCallModal() {
 
   const toggleVideo = () => {
     if (localStream) {
-      localStream.getVideoTracks().forEach((t) => (t.enabled = !isVideoOn));
+      localStream.getVideoTracks().forEach((t: any) => (t.enabled = !isVideoOn));
       setIsVideoOn(!isVideoOn);
     }
   };
 
   const toggleMute = () => {
     if (localStream) {
-      localStream.getAudioTracks().forEach((t) => (t.enabled = !isMuted));
+      localStream.getAudioTracks().forEach((t: any) => (t.enabled = !isMuted));
       setIsMuted(!isMuted);
     }
   };
 
   const handleEndCall = () => {
-    const state = useCallStore.getState();
+    const state = store.getState().call;
     if (state.conversationId && contact) {
       socketEmit.endCall(state.conversationId, contact.id);
     }
-    resetCall();
+    dispatch(resetCall());
   };
 
   const fmt = (s: number) =>

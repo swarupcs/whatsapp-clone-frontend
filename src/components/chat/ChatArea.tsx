@@ -1,3 +1,6 @@
+import { initiateCall, setCallState } from '@/store/slices/callSlice';
+import { store } from '@/store';
+import { useAppSelector } from '@/store';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -29,9 +32,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/store/authStore';
-import { useChatStore } from '@/store/chatStore';
-import { useCallStore } from '@/store/callStore';
+
+
+
 import {
   useMessages,
   useSendMessage,
@@ -136,8 +139,9 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const additionalFileInputRef = useRef<HTMLInputElement>(null);
-  const { user } = useAuthStore();
-  const { activeConversation, typingUsers } = useChatStore();
+  const user = useAppSelector((state) => state.auth.user);
+  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
+  const typingUsers = useAppSelector((state) => state.chat.typingUsers);
   const convId = activeConversation?.id ?? '';
   const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useMessages(convId);
@@ -347,11 +351,11 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
               className='text-muted-foreground'
               onClick={() => {
                 if (user && activeConversation) {
-                  useCallStore.getState().initiateCall(
-                    otherUser ?? activeConversation.users[0],
-                    'video'
-                  );
-                  useCallStore.getState().setCallState({ conversationId: activeConversation.id });
+                  store.dispatch(initiateCall({
+                    receiver: otherUser ?? activeConversation.users[0],
+                    type: 'video'
+                  }));
+                  store.dispatch(setCallState({ conversationId: activeConversation.id }));
                 }
               }}
             >
@@ -363,11 +367,11 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
               className='text-muted-foreground'
               onClick={() => {
                 if (user && activeConversation) {
-                  useCallStore.getState().initiateCall(
-                    otherUser ?? activeConversation.users[0],
-                    'audio'
-                  );
-                  useCallStore.getState().setCallState({ conversationId: activeConversation.id });
+                  store.dispatch(initiateCall({
+                    receiver: otherUser ?? activeConversation.users[0],
+                    type: 'audio'
+                  }));
+                  store.dispatch(setCallState({ conversationId: activeConversation.id }));
                 }
               }}
             >

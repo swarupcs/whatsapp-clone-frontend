@@ -1,8 +1,11 @@
+import { store } from '@/store';
+import { setAuth, clearAuth } from '@/store/slices/authSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { authService } from '../../services';
 import { tokenStorage } from '../../lib';
-import { useAuthStore } from '../../store/authStore';
+
 import type { LoginPayload, RegisterPayload } from '../../types';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
@@ -14,7 +17,9 @@ export const authKeys = {
 // ─── useMe ────────────────────────────────────────────────────────────────────
 
 export function useMe() {
-  const token = useAuthStore((s) => s.token);
+  const dispatch = useAppDispatch();
+
+  const token = useAppSelector((state) => state.auth.token);
   return useQuery({
     queryKey: authKeys.me,
     queryFn: authService.me,
@@ -27,13 +32,13 @@ export function useMe() {
 
 export function useLogin() {
   const queryClient = useQueryClient();
-  const { setAuth } = useAuthStore();
+  
 
   return useMutation({
     mutationFn: (payload: LoginPayload) => authService.login(payload),
     onSuccess: (result) => {
       tokenStorage.setAccess(result.tokens.accessToken);
-      setAuth(result.user, result.tokens.accessToken);
+      store.dispatch(setAuth({ user: result.user, token: result.tokens.accessToken }));
       queryClient.setQueryData(authKeys.me, result.user);
       toast.success(`Welcome back, ${result.user.name}!`);
     },
@@ -46,13 +51,13 @@ export function useLogin() {
 
 export function useRegister() {
   const queryClient = useQueryClient();
-  const { setAuth } = useAuthStore();
+  
 
   return useMutation({
     mutationFn: (payload: RegisterPayload) => authService.register(payload),
     onSuccess: (result) => {
       tokenStorage.setAccess(result.tokens.accessToken);
-      setAuth(result.user, result.tokens.accessToken);
+      store.dispatch(setAuth({ user: result.user, token: result.tokens.accessToken }));
       queryClient.setQueryData(authKeys.me, result.user);
       toast.success('Account created successfully!');
     },
@@ -66,13 +71,13 @@ export function useRegister() {
 
 export function useLogout() {
   const queryClient = useQueryClient();
-  const { clearAuth } = useAuthStore();
+  
 
   return useMutation({
     mutationFn: () => authService.logout(),
     onSettled: () => {
       tokenStorage.clearTokens();
-      clearAuth();
+      store.dispatch(clearAuth());
       queryClient.clear();
     },
   });

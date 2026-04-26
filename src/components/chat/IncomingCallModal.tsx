@@ -1,23 +1,30 @@
+import { setCallState, resetCall } from '@/store/slices/callSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { useCallStore } from '@/store/callStore';
+
 import { socketEmit } from '@/lib/socket';
 
 export default function IncomingCallModal() {
-  const { callStatus, callType, caller, conversationId, setCallState, resetCall } = useCallStore();
+  const dispatch = useAppDispatch();
+
+  const callStatus = useAppSelector((state) => state.call.callStatus);
+  const callType = useAppSelector((state) => state.call.callType);
+  const caller = useAppSelector((state) => state.call.caller);
+  const conversationId = useAppSelector((state) => state.call.conversationId);
   const isRinging = callStatus === 'ringing' && caller;
 
   const acceptCall = () => {
-    setCallState({ callStatus: 'connecting' });
+    dispatch(setCallState({}));
   };
 
   const rejectCall = () => {
     if (caller && conversationId) {
       socketEmit.rejectCall(caller.id, conversationId);
     }
-    resetCall();
+    dispatch(resetCall());
   };
 
   if (!isRinging) return null;

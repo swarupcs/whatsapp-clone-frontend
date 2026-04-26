@@ -1,13 +1,14 @@
+import { useAppSelector } from '@/store';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useAuthStore } from '@/store/authStore';
+
 import { useLogout } from '@/hooks/queries/useAuth';
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const user = useAppSelector((state) => state.auth.user);
   const logoutMutation = useLogout();
   const handleLogout = async () => { await logoutMutation.mutateAsync(); navigate('/login'); };
   if (!user) { navigate('/login'); return null; }

@@ -1,3 +1,6 @@
+import { store } from '@/store';
+import { pushUndoEdit, popUndoEdit, pushUndoDelete, popUndoDelete } from '@/store/slices/chatSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import {
   useInfiniteQuery,
   useMutation,
@@ -7,8 +10,8 @@ import {
 import { toast } from 'sonner';
 import { messageService } from '../../services';
 import { conversationKeys } from './useConversations';
-import { useAuthStore } from '../../store/authStore';
-import { useChatStore } from '../../store/chatStore';
+
+
 import type {
   Message,
   PaginatedData,
@@ -57,6 +60,8 @@ function isOnline(): boolean {
 // ─── useMessages (infinite scroll) ───────────────────────────────────────────
 
 export function useMessages(conversationId: string) {
+  const dispatch = useAppDispatch();
+
   return useInfiniteQuery({
     queryKey: messageKeys.list(conversationId),
     queryFn: ({ pageParam = 1 }) =>
@@ -124,7 +129,7 @@ export function useGlobalMessageSearch(q: string) {
 
 export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
-  const { user } = useAuthStore();
+  const user = useAppSelector((state) => state.auth.user);
 
   return useMutation({
     mutationFn: ({
@@ -294,7 +299,7 @@ export function useSendMessage(conversationId: string) {
 
 export function useEditMessage(conversationId: string) {
   const queryClient = useQueryClient();
-  const { pushUndoEdit } = useChatStore();
+  
 
   return {
     mutate: ({ messageId, payload }: { messageId: string; payload: EditMessagePayload }) => {
@@ -318,17 +323,18 @@ export function useEditMessage(conversationId: string) {
       });
 
       if (originalMessage) {
-        pushUndoEdit({
+        store.dispatch(pushUndoEdit({
           conversationId,
           messageId,
           originalMessage,
           newMessage: payload.message,
           expiresAt: Date.now() + 5000,
-        });
+        }));
 
         setTimeout(() => {
-          const entry = useChatStore.getState().popUndoEdit(messageId);
+          const entry = store.getState().chat.undoEditStack.find((e) => e.messageId === messageId);
           if (entry) {
+            store.dispatch(popUndoEdit(messageId));
             messageService.edit(conversationId, messageId, payload).catch((err) => {
               toast.error(err?.message ?? 'Failed to edit message');
               queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
@@ -346,7 +352,7 @@ export function useEditMessage(conversationId: string) {
 
 export function useDeleteMessage(conversationId: string) {
   const queryClient = useQueryClient();
-  const { pushUndoDelete } = useChatStore();
+  
 
   return {
     mutate: (messageId: string) => {
@@ -366,15 +372,16 @@ export function useDeleteMessage(conversationId: string) {
       });
 
       if (capturedMessage) {
-        pushUndoDelete({
+        store.dispatch(pushUndoDelete({
           conversationId,
           message: capturedMessage,
           expiresAt: Date.now() + 5000,
-        });
+        }));
 
         setTimeout(() => {
-          const entry = useChatStore.getState().popUndoDelete(messageId);
+          const entry = store.getState().chat.undoDeleteStack.find(e => e.message.id === messageId);
           if (entry) {
+            store.dispatch(popUndoDelete(messageId));
             messageService.delete(conversationId, messageId).catch(() => {
               toast.error('Failed to delete message');
               queryClient.setQueryData(messageKeys.list(conversationId), (old: any) =>
@@ -501,20 +508,4 @@ export function useMarkSeen(conversationId: string) {
 }
 
 // ─── Private helper ───────────────────────────────────────────────────────────
-
-export function patchMessage(
-  old: any,
-  messageId: string,
-  updater: (m: Message) => Message,
-): any {
-  if (!old) return old;
-  return {
-    ...old,
-    pages: old.pages.map((page: PaginatedData<Message>) => ({
-      ...page,
-      data: Array.isArray(page.data)
-        ? page.data.map((m) => (m.id === messageId ? updater(m) : m))
-        : [],
-    })),
-  };
-}
+export function patchMessage(old: any, messageId: string, updater: (m: Message) => Message): any { if (!old) return old; return { ...old, pages: old.pages.map((page: PaginatedData<Message>) => ({ ...page, data: Array.isArray(page.data) ? page.data.map((m) => (m.id === messageId ? updater(m) : m)) : [], })), }; }

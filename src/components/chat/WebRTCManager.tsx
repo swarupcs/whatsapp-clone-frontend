@@ -1,11 +1,14 @@
+import { store, useAppDispatch } from '@/store';
+import { useAppSelector } from '@/store';
 import { useEffect, useRef } from 'react';
-import { useCallStore } from '@/store/callStore';
-import { useAuthStore } from '@/store/authStore';
+import { setCallState, resetCall } from '@/store/slices/callSlice';
+
 import { getSocket, socketEmit, SOCKET_EVENTS } from '@/lib/socket';
 
 export default function WebRTCManager() {
-  const { user } = useAuthStore();
-  const callStore = useCallStore();
+  const user = useAppSelector((state) => state.auth.user);
+  const dispatch = useAppDispatch();
+  const callState = useAppSelector((state) => state.call);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
   const rtcConfig = {
@@ -17,13 +20,12 @@ export default function WebRTCManager() {
       pcRef.current.close();
       pcRef.current = null;
     }
-    const state = useCallStore.getState();
-    state.localStream?.getTracks().forEach((t) => t.stop());
-    state.remoteStream?.getTracks().forEach((t) => t.stop());
+    (window as any).localStream?.getTracks().forEach((t: any) => t.stop());
+    (window as any).remoteStream?.getTracks().forEach((t: any) => t.stop());
   };
 
   useEffect(() => {
-    const { callStatus, isIncomingCall, conversationId, callType, receiver, caller, remoteSignal } = callStore;
+    const { callStatus, isIncomingCall, conversationId, callType, receiver, caller, remoteSignal } = callState;
 
     const setupCaller = async () => {
       try {
@@ -31,7 +33,7 @@ export default function WebRTCManager() {
           audio: true,
           video: callType === 'video',
         });
-        callStore.setCallState({ localStream: stream });
+        (window as any).localStream = stream;
 
         const pc = new RTCPeerConnection(rtcConfig);
         pcRef.current = pc;
@@ -39,7 +41,7 @@ export default function WebRTCManager() {
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
         pc.ontrack = (event) => {
-          callStore.setCallState({ remoteStream: event.streams[0] });
+          (window as any).remoteStream = event.streams[0];
         };
 
         pc.onicecandidate = (event) => {
@@ -56,7 +58,7 @@ export default function WebRTCManager() {
         }
       } catch (err) {
         console.error('Caller setup failed:', err);
-        callStore.resetCall();
+        dispatch(resetCall());
       }
     };
 
@@ -66,7 +68,7 @@ export default function WebRTCManager() {
           audio: true,
           video: callType === 'video',
         });
-        callStore.setCallState({ localStream: stream });
+        (window as any).localStream = stream;
 
         const pc = new RTCPeerConnection(rtcConfig);
         pcRef.current = pc;
@@ -74,7 +76,7 @@ export default function WebRTCManager() {
         stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
         pc.ontrack = (event) => {
-          callStore.setCallState({ remoteStream: event.streams[0] });
+          (window as any).remoteStream = event.streams[0];
         };
 
         pc.onicecandidate = (event) => {
@@ -92,11 +94,11 @@ export default function WebRTCManager() {
 
         if (conversationId && caller) {
           socketEmit.acceptCall(caller.id, conversationId, answer);
-          callStore.setCallState({ callStatus: 'connected', callStartTime: Date.now() });
+          dispatch(setCallState({ callStatus: 'connected', callStartTime: Date.now() }));
         }
       } catch (err) {
         console.error('Receiver setup failed:', err);
-        callStore.resetCall();
+        dispatch(resetCall());
       }
     };
 
@@ -111,17 +113,17 @@ export default function WebRTCManager() {
     if (callStatus === 'idle') {
       cleanupCall();
     }
-  }, [callStore.callStatus]);
+  }, [callState.callStatus, dispatch]);
 
   useEffect(() => {
     let iv: any;
-    if (callStore.callStatus === 'connected') {
+    if (callState.callStatus === 'connected') {
       iv = setInterval(() => {
-        useCallStore.setState((s) => ({ callDuration: s.callDuration + 1 }));
+        store.dispatch(setCallState({ callDuration: store.getState().call.callDuration + 1 }));
       }, 1000);
     }
     return () => clearInterval(iv);
-  }, [callStore.callStatus]);
+  }, [callState.callStatus, dispatch]);
 
   useEffect(() => {
     let socket;
@@ -136,7 +138,7 @@ export default function WebRTCManager() {
     const handleCallAccepted = async (data: { acceptorId: string; conversationId: string; signal?: unknown }) => {
       if (pcRef.current && data.signal) {
         await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.signal as any));
-        useCallStore.getState().setCallState({ callStatus: 'connected', callStartTime: Date.now() });
+        store.dispatch(setCallState({ callStatus: 'connected', callStartTime: Date.now() }));
       }
     };
 

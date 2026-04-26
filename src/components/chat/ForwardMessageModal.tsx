@@ -1,3 +1,4 @@
+import { useAppSelector } from '@/store';
 import { useState } from 'react';
 import { Search, Forward, Loader2 } from 'lucide-react';
 import {
@@ -16,7 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useConversations } from '@/hooks/queries/useConversations';
 import { useForwardMessage } from '@/hooks/queries/useMessages';
-import { useChatStore } from '@/store/chatStore';
+
 import type { Message } from '@/types';
 
 interface Props {
@@ -34,7 +35,7 @@ export default function ForwardMessageModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [isForwarding, setIsForwarding] = useState(false);
 
-  const { activeConversation } = useChatStore();
+  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
   const { data: conversations = [] } = useConversations();
 
   // FIX: useForwardMessage now uses the SOURCE conversation id (where the

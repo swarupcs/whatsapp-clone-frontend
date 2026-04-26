@@ -1,7 +1,10 @@
+import { store } from '@/store';
+import { popUndoEdit, popUndoDelete } from '@/store/slices/chatSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useChatStore } from '@/store/chatStore';
+
 import { messageKeys, patchMessage } from '@/hooks/queries/useMessages';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -10,11 +13,14 @@ interface Props {
 }
 
 export default function UndoToast({ conversationId }: Props) {
-  const { undoDeleteStack, undoEditStack, popUndoDelete, popUndoEdit } = useChatStore();
+  const dispatch = useAppDispatch();
+
+  const undoDeleteStack = useAppSelector((state) => state.chat.undoDeleteStack);
+  const undoEditStack = useAppSelector((state) => state.chat.undoEditStack);
   const queryClient = useQueryClient();
 
   const handleUndoDelete = (messageId: string) => {
-    const entry = popUndoDelete(messageId);
+    const entry = store.getState().chat.undoDeleteStack.find(e => e.message.id === messageId); dispatch(popUndoDelete(messageId));
     if (!entry) return;
 
     // Restore the message in the cache; the API call is now cancelled because
@@ -25,7 +31,7 @@ export default function UndoToast({ conversationId }: Props) {
   };
 
   const handleUndoEdit = (messageId: string) => {
-    const entry = popUndoEdit(messageId);
+    const entry = store.getState().chat.undoEditStack.find(e => e.messageId === messageId); dispatch(popUndoEdit(messageId));
     if (!entry) return;
 
     // Revert the message text in the cache; the API call is cancelled.

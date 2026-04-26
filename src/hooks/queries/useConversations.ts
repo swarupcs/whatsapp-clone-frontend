@@ -1,8 +1,11 @@
+import { store } from '@/store';
+import { setActiveConversation } from '@/store/slices/chatSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { conversationService } from '../../services';
-import { useAuthStore } from '../../store/authStore';
-import { useChatStore } from '../../store/chatStore';
+
+
 import type {
   Conversation,
   CreateGroupPayload,
@@ -20,7 +23,9 @@ export const conversationKeys = {
 // ─── useConversations ─────────────────────────────────────────────────────────
 
 export function useConversations() {
-  const token = useAuthStore((s) => s.token);
+  const dispatch = useAppDispatch();
+
+  const token = useAppSelector((state) => state.auth.token);
   return useQuery({
     queryKey: conversationKeys.all,
     queryFn: conversationService.list,
@@ -45,7 +50,7 @@ export function useConversation(id: string) {
 
 export function useCreateDirectConversation() {
   const queryClient = useQueryClient();
-  const { setActiveConversation } = useChatStore();
+  
 
   return useMutation({
     mutationFn: (userId: string) =>
@@ -58,7 +63,7 @@ export function useCreateDirectConversation() {
             ? old
             : [conversation, ...old],
       );
-      setActiveConversation(conversation);
+      store.dispatch(setActiveConversation(null));
     },
     onError: (err: any) => {
       toast.error(err?.message ?? 'Failed to start conversation');
@@ -70,7 +75,7 @@ export function useCreateDirectConversation() {
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();
-  const { setActiveConversation } = useChatStore();
+  
 
   return useMutation({
     mutationFn: (payload: CreateGroupPayload) =>
@@ -80,7 +85,7 @@ export function useCreateGroup() {
         conversationKeys.all,
         (old = []) => [conversation, ...old],
       );
-      setActiveConversation(conversation);
+      store.dispatch(setActiveConversation(null));
       toast.success('Group created!');
     },
     onError: (err: any) => {
@@ -157,7 +162,7 @@ export function useRemoveGroupMember(conversationId: string) {
 
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
-  const { activeConversation, setActiveConversation } = useChatStore();
+  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
 
   return useMutation({
     mutationFn: (conversationId: string) =>
@@ -170,7 +175,7 @@ export function useLeaveGroup() {
       );
       // Clear active conversation if it was the one we left
       if (activeConversation?.id === conversationId) {
-        setActiveConversation(null);
+        store.dispatch(setActiveConversation(null));
       }
       toast.success('You left the group');
     },

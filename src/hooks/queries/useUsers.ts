@@ -1,7 +1,10 @@
+import { store } from '@/store';
+import { setAuth } from '@/store/slices/authSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { userService } from '../../services';
-import { useAuthStore } from '../../store/authStore';
+
 import type { UpdateProfilePayload, UpdateStatusPayload } from '../../types';
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
@@ -16,6 +19,8 @@ export const userKeys = {
 // ─── useUserSearch ────────────────────────────────────────────────────────────
 
 export function useUserSearch(q: string) {
+  const dispatch = useAppDispatch();
+
   return useQuery({
     queryKey: userKeys.search(q),
     queryFn: () => userService.search(q),
@@ -51,13 +56,14 @@ export function useUser(userId: string) {
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
-  const { user, setAuth, token } = useAuthStore();
+  const user = useAppSelector((state) => state.auth.user);
+  const token = useAppSelector((state) => state.auth.token);
 
   return useMutation({
     mutationFn: (payload: UpdateProfilePayload) =>
       userService.updateProfile(payload),
     onSuccess: (updated) => {
-      if (token) setAuth(updated, token);
+      if (token) store.dispatch(setAuth({ user: updated, token }));
       queryClient.setQueryData(['auth', 'me'], updated);
       queryClient.setQueryData(userKeys.detail(updated.id), updated);
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -73,13 +79,13 @@ export function useUpdateProfile() {
 
 export function useUpdateStatus() {
   const queryClient = useQueryClient();
-  const { token, setAuth } = useAuthStore();
+  const token = useAppSelector((state) => state.auth.token);
 
   return useMutation({
     mutationFn: (payload: UpdateStatusPayload) =>
       userService.updateStatus(payload),
     onSuccess: (updated) => {
-      if (token) setAuth(updated, token);
+      if (token) store.dispatch(setAuth({ user: updated, token }));
       queryClient.setQueryData(['auth', 'me'], updated);
       toast.success(`Status set to ${updated.status}`);
     },

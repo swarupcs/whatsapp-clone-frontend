@@ -1,3 +1,6 @@
+import { store } from '@/store';
+import { resetCall } from '@/store/slices/callSlice';
+import { useAppSelector, useAppDispatch } from '@/store';
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PhoneOff, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
@@ -5,11 +8,18 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { useCallStore } from '@/store/callStore';
+
 import { socketEmit } from '@/lib/socket';
 
-export default function AudioCallModal() {
-  const { callStatus, callType, caller, receiver, callDuration, localStream, remoteStream, resetCall, isIncomingCall } = useCallStore();
+export default function AudioCallModal({ localStream, remoteStream }: { localStream?: MediaStream | null, remoteStream?: MediaStream | null }) {
+  const dispatch = useAppDispatch();
+
+  const callStatus = useAppSelector((state) => state.call.callStatus);
+  const callType = useAppSelector((state) => state.call.callType);
+  const caller = useAppSelector((state) => state.call.caller);
+  const receiver = useAppSelector((state) => state.call.receiver);
+  const callDuration = useAppSelector((state) => state.call.callDuration);
+      const isIncomingCall = useAppSelector((state) => state.call.isIncomingCall);
   const contact = isIncomingCall ? caller : receiver;
   const isOpen = callStatus !== 'idle' && callType === 'audio';
 
@@ -26,17 +36,17 @@ export default function AudioCallModal() {
 
   const toggleMute = () => {
     if (localStream) {
-      localStream.getAudioTracks().forEach((t) => (t.enabled = !isMuted));
+      localStream.getAudioTracks().forEach((t: any) => (t.enabled = !isMuted));
       setIsMuted(!isMuted);
     }
   };
 
   const handleEndCall = () => {
-    const state = useCallStore.getState();
+    const state = store.getState().call;
     if (state.conversationId && contact) {
       socketEmit.endCall(state.conversationId, contact.id);
     }
-    resetCall();
+    dispatch(resetCall());
   };
 
   const fmt = (s: number) =>

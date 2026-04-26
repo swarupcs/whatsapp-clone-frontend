@@ -1,3 +1,4 @@
+import { useAppSelector, useAppDispatch } from '@/store';
 import {
   createContext, useContext, useEffect, useRef, useState, type ReactNode,
 } from 'react';
@@ -5,12 +6,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { connectSocket, disconnectSocket, socketEmit, SOCKET_EVENTS } from '../lib/socket';
 import { notificationService } from '../lib/notifications';
-import { useAuthStore } from '../store/authStore';
-import { useChatStore } from '../store/chatStore';
-import { useCallStore } from '../store/callStore';
 import { messageKeys } from '../hooks/queries/useMessages';
 import { conversationKeys } from '../hooks/queries/useConversations';
 import { useOnlineUsers } from '../hooks/queries/useUsers';
+import { setActiveConversation, setOnlineUsers, setUserOnline, setUserOffline, setTyping } from '@/store/slices/chatSlice';
+import { setCallState, resetCall } from '@/store/slices/callSlice';
+import { store } from '@/store';
 import type {
   Message, Conversation, NewMessagePayload, ReactionUpdatedPayload,
   MessageSeenPayload, PinPayload, IncomingCallPayload, TypingPayload, PaginatedData,
@@ -84,21 +85,22 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
 }
 
 export function SocketProvider({ children }: { children: ReactNode }) {
+  const dispatch = useAppDispatch();
+
   const [connected, setConnected] = useState(false);
   const queryClient = useQueryClient();
-  const { user, token } = useAuthStore();
-  const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } = useChatStore();
+  const user = useAppSelector((state) => state.auth.user);
+  const token = useAppSelector((state) => state.auth.token);
+  
   const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
+  const onlineUsers = useAppSelector((state) => state.chat.onlineUsers);
 
   const activeConversationRef = useRef<Conversation | null>(null);
   useEffect(() => {
-    const unsub = useChatStore.subscribe(
-      (state) => state.activeConversation,
-      (conv) => { activeConversationRef.current = conv; },
-    );
-    activeConversationRef.current = useChatStore.getState().activeConversation;
-    return unsub;
-  }, []);
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
 
   const userIdRef = useRef<string | undefined>(user?.id);
   useEffect(() => { userIdRef.current = user?.id; });
@@ -107,14 +109,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const { data: httpOnlineUserIds } = useOnlineUsers();
   useEffect(() => {
     if (httpOnlineUserIds && httpOnlineUserIds.length > 0) {
-      // Merge HTTP polling data with whatever socket data we already have
-      const currentOnline = useChatStore.getState().onlineUsers;
-      const merged = Array.from(new Set([...currentOnline, ...httpOnlineUserIds]));
-      if (merged.length !== currentOnline.length) {
-        setOnlineUsers(merged);
+      const merged = Array.from(new Set([...onlineUsers, ...httpOnlineUserIds]));
+      if (merged.length !== onlineUsers.length) {
+        dispatch(setOnlineUsers(merged));
       }
     }
-  }, [httpOnlineUserIds, setOnlineUsers]);
+  }, [httpOnlineUserIds, onlineUsers, dispatch]);
 
   useEffect(() => {
     if (!token || !user) { disconnectSocket(); setConnected(false); return; }
@@ -125,14 +125,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on(SOCKET_EVENTS.DISCONNECT, () => setConnected(false));
     socket.on(SOCKET_EVENTS.CONNECT_ERROR, () => setConnected(false));
 
-    socket.on(SOCKET_EVENTS.ONLINE_USERS, ({ userIds }: { userIds: string[] }) => setOnlineUsers(userIds));
-    socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) => setUserOnline(userId));
-    socket.on(SOCKET_EVENTS.USER_OFFLINE, ({ userId }: { userId: string }) => setUserOffline(userId));
+    socket.on(SOCKET_EVENTS.ONLINE_USERS, ({ userIds }: { userIds: string[] }) => dispatch(setOnlineUsers(userIds)));
+    socket.on(SOCKET_EVENTS.USER_ONLINE, ({ userId }: { userId: string }) => dispatch(setUserOnline(userId)));
+    socket.on(SOCKET_EVENTS.USER_OFFLINE, ({ userId }: { userId: string }) => dispatch(setUserOffline(userId)));
 
     socket.on(SOCKET_EVENTS.TYPING_START, (data: TypingPayload) =>
-      setTyping(data.conversationId, data.userId, true));
+      dispatch(setTyping({ conversationId: data.conversationId, userId: data.userId, isTyping: true })));
     socket.on(SOCKET_EVENTS.TYPING_STOP, (data: TypingPayload) =>
-      setTyping(data.conversationId, data.userId, false));
+      dispatch(setTyping({ conversationId: data.conversationId, userId: data.userId, isTyping: false })));
 
     socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message }: NewMessagePayload) => {
       const currentUserId = userIdRef.current;
@@ -202,14 +202,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.map((c) => (c.id === conversationId ? conversation : c)));
       if (activeConversationRef.current?.id === conversationId)
-        useChatStore.getState().setActiveConversation(conversation);
+        dispatch(setActiveConversation(conversation));
     });
 
     socket.on('member_removed', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.map((c) => (c.id === conversationId ? conversation : c)));
       if (activeConversationRef.current?.id === conversationId)
-        useChatStore.getState().setActiveConversation(conversation);
+        dispatch(setActiveConversation(conversation));
     });
 
     socket.on('removed_from_group', ({ conversationId }: { conversationId: string }) => {
@@ -217,30 +217,29 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.filter((c) => c.id !== conversationId));
       if (activeConversationRef.current?.id === conversationId)
-        useChatStore.getState().setActiveConversation(null);
+        dispatch(setActiveConversation(null));
     });
 
     socket.on(SOCKET_EVENTS.INCOMING_CALL, (data: IncomingCallPayload & { signal?: unknown }) => {
-      // Don't accept if already in a call
-      if (useCallStore.getState().callStatus !== 'idle') return;
-      useCallStore.getState().setCallState({
+      if (store.getState().call.callStatus !== 'idle') return;
+      dispatch(setCallState({
         callStatus: 'ringing',
         callType: data.callType,
         caller: data.caller,
         conversationId: data.conversationId,
         isIncomingCall: true,
         remoteSignal: data.signal,
-      });
+      }));
     });
 
     socket.on(SOCKET_EVENTS.CALL_REJECTED, () => {
       toast.info('Call was declined');
-      useCallStore.getState().resetCall();
+      dispatch(resetCall());
     });
 
     socket.on(SOCKET_EVENTS.CALL_ENDED, () => {
       toast.info('Call ended');
-      useCallStore.getState().resetCall();
+      dispatch(resetCall());
     });
 
     return () => { socket.removeAllListeners(); disconnectSocket(); setConnected(false); };

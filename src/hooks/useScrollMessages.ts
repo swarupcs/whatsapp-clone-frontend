@@ -1,6 +1,7 @@
+import { useAppSelector } from '@/store';
 import { useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
-import { useAuthStore } from '../store/authStore';
+
 import type { Message } from '../types';
 
 interface Options {
@@ -18,7 +19,7 @@ export function useScrollMessages({
   isFetchingNextPage,
   fetchNextPage,
 }: Options) {
-  const { user } = useAuthStore();
+  const user = useAppSelector((state) => state.auth.user);
   const { emitSeen } = useSocket();
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
