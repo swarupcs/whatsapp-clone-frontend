@@ -73,8 +73,8 @@ export const socketEmit = {
   unpinMessage: (conversationId: string, messageId: string) =>
     socket?.emit(SOCKET_EVENTS.UNPIN_MESSAGE, { conversationId, messageId }),
 
-  initiateCall: (conversationId: string, callType: CallType, caller: User) =>
-    socket?.emit(SOCKET_EVENTS.INITIATE_CALL, { conversationId, callType, callerId: caller.id, caller }),
+  initiateCall: (conversationId: string, callType: CallType, caller: User, signal?: unknown) =>
+    socket?.emit(SOCKET_EVENTS.INITIATE_CALL, { conversationId, callType, callerId: caller.id, caller, signal }),
 
   acceptCall: (callerId: string, conversationId: string, signal?: unknown) =>
     socket?.emit(SOCKET_EVENTS.CALL_ACCEPTED, { callerId, conversationId, signal }),
@@ -84,4 +84,7 @@ export const socketEmit = {
 
   endCall: (conversationId: string, otherUserId: string) =>
     socket?.emit(SOCKET_EVENTS.CALL_ENDED, { conversationId, otherUserId }),
+
+  callSignal: (toUserId: string, signal: unknown) =>
+    socket?.emit(SOCKET_EVENTS.CALL_SIGNAL, { toUserId, signal }),
 };

@@ -3,10 +3,23 @@ import { Phone, PhoneOff, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useCallStore } from '@/store/callStore';
+import { socketEmit } from '@/lib/socket';
 
 export default function IncomingCallModal() {
-  const { callStatus, callType, caller, acceptCall, rejectCall } = useCallStore();
+  const { callStatus, callType, caller, conversationId, setCallState, resetCall } = useCallStore();
   const isRinging = callStatus === 'ringing' && caller;
+
+  const acceptCall = () => {
+    setCallState({ callStatus: 'connecting' });
+  };
+
+  const rejectCall = () => {
+    if (caller && conversationId) {
+      socketEmit.rejectCall(caller.id, conversationId);
+    }
+    resetCall();
+  };
+
   if (!isRinging) return null;
 
   return (

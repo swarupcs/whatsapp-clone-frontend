@@ -112,8 +112,6 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previewImage, setPreviewImage] = useState<FileAttachment | null>(null);
-  const [showVideoCall, setShowVideoCall] = useState(false);
-  const [showAudioCall, setShowAudioCall] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(
     null,
   );
@@ -346,7 +344,15 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
               variant='ghost'
               size='icon'
               className='text-muted-foreground'
-              onClick={() => setShowVideoCall(true)}
+              onClick={() => {
+                if (user && activeConversation) {
+                  useCallStore.getState().initiateCall(
+                    otherUser ?? activeConversation.users[0],
+                    'video'
+                  );
+                  useCallStore.getState().setCallState({ conversationId: activeConversation.id });
+                }
+              }}
             >
               <Video className='h-5 w-5' />
             </Button>
@@ -354,7 +360,15 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
               variant='ghost'
               size='icon'
               className='text-muted-foreground'
-              onClick={() => setShowAudioCall(true)}
+              onClick={() => {
+                if (user && activeConversation) {
+                  useCallStore.getState().initiateCall(
+                    otherUser ?? activeConversation.users[0],
+                    'audio'
+                  );
+                  useCallStore.getState().setCallState({ conversationId: activeConversation.id });
+                }
+              }}
             >
               <Phone className='h-5 w-5' />
             </Button>

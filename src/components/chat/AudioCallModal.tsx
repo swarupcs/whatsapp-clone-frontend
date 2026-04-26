@@ -1,42 +1,93 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PhoneOff, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-interface Props { isOpen: boolean; onClose: () => void; contactName: string; contactAvatar: string; }
-export default function AudioCallModal({ isOpen, onClose, contactName, contactAvatar }: Props) {
+import { useCallStore } from '@/store/callStore';
+import { socketEmit } from '@/lib/socket';
+
+export default function AudioCallModal() {
+  const { callStatus, callType, caller, receiver, callDuration, localStream, remoteStream, resetCall, isIncomingCall } = useCallStore();
+  const contact = isIncomingCall ? caller : receiver;
+  const isOpen = callStatus !== 'idle' && callType === 'audio';
+
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [callDuration, setCallDuration] = useState(0);
-  const [callState, setCallState] = useState<'calling' | 'connected'>('calling');
-  useEffect(() => { if (isOpen) { setCallState('calling'); setCallDuration(0); const t = setTimeout(() => setCallState('connected'), 2000 + Math.random() * 2000); return () => clearTimeout(t); } }, [isOpen]);
-  useEffect(() => { let iv: ReturnType<typeof setInterval>; if (isOpen && callState === 'connected') iv = setInterval(() => setCallDuration((d) => d + 1), 1000); return () => clearInterval(iv); }, [isOpen, callState]);
-  const fmt = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, isOpen]);
+
+  const toggleMute = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach((t) => (t.enabled = !isMuted));
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const handleEndCall = () => {
+    const state = useCallStore.getState();
+    if (state.conversationId && contact) {
+      socketEmit.endCall(state.conversationId, contact.id);
+    }
+    resetCall();
+  };
+
+  const fmt = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+
+  if (!isOpen || !contact) return null;
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={handleEndCall}>
       <DialogContent className='max-w-md w-[90vw] p-0 border-0 bg-gradient-to-b from-card to-background overflow-hidden'>
         <div className='flex flex-col items-center p-8'>
-          <div className='relative mb-6'>
-            {callState === 'calling' && [1, 2, 3].map((r) => (
-              <motion.div key={r} className='absolute inset-0 rounded-full border-2 border-primary/20' initial={{ scale: 1, opacity: 0.3 }} animate={{ scale: [1, 1.3 + r * 0.2], opacity: [0.3, 0] }} transition={{ duration: 1.5, repeat: Infinity, delay: r * 0.3 }} style={{ width: 120, height: 120, left: '50%', top: '50%', marginLeft: -60, marginTop: -60 }} />
-            ))}
-            <Avatar className='h-28 w-28 ring-4 ring-primary/30 shadow-xl'><AvatarImage src={contactAvatar} /><AvatarFallback className='text-3xl'>{contactName[0]}</AvatarFallback></Avatar>
+          <motion.div
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className='relative mb-8'
+          >
+            <div className={cn('absolute inset-0 bg-primary/20 rounded-full blur-2xl transition-all duration-1000', callStatus === 'connected' ? 'animate-pulse' : 'animate-ping')} />
+            <Avatar className='h-32 w-32 ring-4 ring-primary/30 relative z-10'>
+              <AvatarImage src={contact.picture} />
+              <AvatarFallback className='text-4xl'>{contact.name[0]}</AvatarFallback>
+            </Avatar>
+          </motion.div>
+
+          <div className='text-center space-y-2 mb-12'>
+            <h2 className='text-2xl font-bold'>{contact.name}</h2>
+            <p className='text-muted-foreground text-lg capitalize'>
+              {callStatus === 'connected' ? fmt(callDuration) : `${callStatus}...`}
+            </p>
           </div>
-          <h3 className='text-xl font-semibold mb-1'>{contactName}</h3>
-          <motion.p className='text-muted-foreground mb-8' animate={callState === 'calling' ? { opacity: [0.5, 1, 0.5] } : {}} transition={{ duration: 1.5, repeat: Infinity }}>
-            {callState === 'calling' ? 'Calling...' : fmt(callDuration)}
-          </motion.p>
-          <div className='flex items-center justify-center gap-6'>
-            <Button variant='secondary' size='lg' onClick={() => setIsMuted(!isMuted)} className={cn('h-14 w-14 rounded-full', isMuted && 'bg-destructive hover:bg-destructive/90 text-white')}>
-              {isMuted ? <MicOff className='h-6 w-6' /> : <Mic className='h-6 w-6' />}
-            </Button>
-            <Button variant='destructive' size='lg' onClick={onClose} className='h-16 w-16 rounded-full shadow-lg shadow-destructive/30'><PhoneOff className='h-7 w-7' /></Button>
-            <Button variant='secondary' size='lg' onClick={() => setIsSpeakerOn(!isSpeakerOn)} className={cn('h-14 w-14 rounded-full', isSpeakerOn && 'bg-primary hover:bg-primary/90 text-white')}>
-              {isSpeakerOn ? <Volume2 className='h-6 w-6' /> : <VolumeX className='h-6 w-6' />}
-            </Button>
-          </div>
+
+          <audio ref={remoteAudioRef} autoPlay className='hidden' />
+
+          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className='flex items-center justify-center gap-6 w-full'>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <Button variant='secondary' size='lg' onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+                className={cn('h-14 w-14 rounded-full', !isSpeakerOn && 'bg-secondary hover:bg-secondary/80')}>
+                {!isSpeakerOn ? <VolumeX className='h-6 w-6' /> : <Volume2 className='h-6 w-6' />}
+              </Button>
+            </motion.div>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <Button variant='secondary' size='lg' onClick={toggleMute}
+                className={cn('h-14 w-14 rounded-full', isMuted && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground')}>
+                {isMuted ? <MicOff className='h-6 w-6' /> : <Mic className='h-6 w-6' />}
+              </Button>
+            </motion.div>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <Button variant='destructive' size='lg' onClick={handleEndCall} className='h-14 w-14 rounded-full'>
+                <PhoneOff className='h-6 w-6' />
+              </Button>
+            </motion.div>
+          </motion.div>
         </div>
       </DialogContent>
     </Dialog>

@@ -88,7 +88,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { user, token } = useAuthStore();
   const { setOnlineUsers, setUserOnline, setUserOffline, setTyping } = useChatStore();
-  const { simulateIncomingCall, endCall } = useCallStore();
   const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const activeConversationRef = useRef<Conversation | null>(null);
@@ -221,11 +220,28 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         useChatStore.getState().setActiveConversation(null);
     });
 
-    socket.on(SOCKET_EVENTS.INCOMING_CALL, (data: IncomingCallPayload) => {
-      simulateIncomingCall(data.caller, data.callType);
+    socket.on(SOCKET_EVENTS.INCOMING_CALL, (data: IncomingCallPayload & { signal?: unknown }) => {
+      // Don't accept if already in a call
+      if (useCallStore.getState().callStatus !== 'idle') return;
+      useCallStore.getState().setCallState({
+        callStatus: 'ringing',
+        callType: data.callType,
+        caller: data.caller,
+        conversationId: data.conversationId,
+        isIncomingCall: true,
+        remoteSignal: data.signal,
+      });
     });
-    socket.on(SOCKET_EVENTS.CALL_REJECTED, () => { toast.info('Call was declined'); endCall(); });
-    socket.on(SOCKET_EVENTS.CALL_ENDED, () => { toast.info('Call ended'); endCall(); });
+
+    socket.on(SOCKET_EVENTS.CALL_REJECTED, () => {
+      toast.info('Call was declined');
+      useCallStore.getState().resetCall();
+    });
+
+    socket.on(SOCKET_EVENTS.CALL_ENDED, () => {
+      toast.info('Call ended');
+      useCallStore.getState().resetCall();
+    });
 
     return () => { socket.removeAllListeners(); disconnectSocket(); setConnected(false); };
   }, [token]);
