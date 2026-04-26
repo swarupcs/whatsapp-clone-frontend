@@ -64,6 +64,7 @@ import TypingIndicator from './TypingIndicator';
 import MessageActions from './MessageActions';
 import UndoToast from './UndoToast';
 import ForwardMessageModal from './ForwardMessageModal';
+import AddMemberModal from './AddMemberModal';
 import ReplyPreview from './ReplyPreview';
 import { QuotedMessage } from './QuotedMessage';
 import PinnedMessagesBar from './PinnedMessagesBar';
@@ -680,6 +681,7 @@ function GroupInfoPanel({
   const leaveGroup = useLeaveGroup();
   const removeMember = useRemoveGroupMember(conversation.id);
   const isAdmin = conversation.adminId === currentUserId;
+  const [showAddMember, setShowAddMember] = useState(false);
 
   const handleLeave = async () => {
     if (!window.confirm('Are you sure you want to leave this group?')) return;
@@ -726,9 +728,21 @@ function GroupInfoPanel({
 
         {/* Members list */}
         <div className='px-4 py-3'>
-          <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3'>
-            {conversation.users.length} members
-          </p>
+          <div className='flex items-center justify-between mb-3'>
+            <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
+              {conversation.users.length} members
+            </p>
+            {isAdmin && (
+              <Button
+                variant='ghost'
+                size='sm'
+                className='h-7 px-2 text-xs font-medium text-primary hover:text-primary hover:bg-primary/10'
+                onClick={() => setShowAddMember(true)}
+              >
+                + Add
+              </Button>
+            )}
+          </div>
           <div className='space-y-1'>
             {conversation.users.map((member) => {
               const isMemberAdmin = member.id === conversation.adminId;
@@ -795,6 +809,14 @@ function GroupInfoPanel({
           Leave group
         </Button>
       </div>
+
+      {isAdmin && (
+        <AddMemberModal
+          open={showAddMember}
+          onOpenChange={setShowAddMember}
+          conversation={conversation}
+        />
+      )}
     </motion.div>
   );
 }
