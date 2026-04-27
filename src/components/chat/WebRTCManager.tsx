@@ -11,8 +11,26 @@ export default function WebRTCManager() {
   const callState = useAppSelector((state) => state.call);
   const pcRef = useRef<RTCPeerConnection | null>(null);
 
-  const rtcConfig = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  const rtcConfig: RTCConfiguration = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      {
+        urls: import.meta.env.VITE_TURN_SERVER_URL || 'turn:openrelay.metered.ca:80',
+        username: import.meta.env.VITE_TURN_SERVER_USER || 'openrelayproject',
+        credential: import.meta.env.VITE_TURN_SERVER_CREDENTIAL || 'openrelayproject',
+      },
+      {
+        urls: import.meta.env.VITE_TURN_SERVER_URL_443 || 'turn:openrelay.metered.ca:443',
+        username: import.meta.env.VITE_TURN_SERVER_USER || 'openrelayproject',
+        credential: import.meta.env.VITE_TURN_SERVER_CREDENTIAL || 'openrelayproject',
+      },
+      {
+        urls: import.meta.env.VITE_TURN_SERVER_URL_TCP || 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: import.meta.env.VITE_TURN_SERVER_USER || 'openrelayproject',
+        credential: import.meta.env.VITE_TURN_SERVER_CREDENTIAL || 'openrelayproject',
+      }
+    ],
   };
 
   const cleanupCall = () => {
