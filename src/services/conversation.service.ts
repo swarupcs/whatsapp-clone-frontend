@@ -25,6 +25,12 @@ export const conversationService = {
   createGroup: (payload: CreateGroupPayload): Promise<Conversation> =>
     http.post<Conversation>('/conversations/group', payload),
 
+  updateGroup: (
+    conversationId: string,
+    payload: { name?: string; picture?: string },
+  ): Promise<Conversation> =>
+    http.patch<Conversation>(`/conversations/${conversationId}`, payload),
+
   markRead: (conversationId: string): Promise<null> =>
     http.post<null>(`/conversations/${conversationId}/read`, {}),
 

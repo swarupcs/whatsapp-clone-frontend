@@ -233,6 +233,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         dispatch(setActiveConversation(conversation));
     });
 
+    socket.on('group_updated', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
+      queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
+        old.map((c) => (c.id === conversationId ? conversation : c)));
+      queryClient.setQueryData(conversationKeys.detail(conversationId), conversation);
+      if (activeConversationRef.current?.id === conversationId)
+        dispatch(setActiveConversation(conversation));
+    });
+
     socket.on('removed_from_group', ({ conversationId }: { conversationId: string }) => {
       toast.info('You were removed from a group');
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>

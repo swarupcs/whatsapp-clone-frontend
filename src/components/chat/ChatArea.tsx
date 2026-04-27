@@ -27,6 +27,7 @@ import {
   RotateCw,
   LogOut,
   UserMinus,
+  Camera,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,6 +49,7 @@ import {
   useMarkRead,
   useLeaveGroup,
   useRemoveGroupMember,
+  useUpdateGroup,
 } from '@/hooks/queries/useConversations';
 import { useTyping } from '@/hooks/useTyping';
 import { useScrollMessages } from '@/hooks/useScrollMessages';
@@ -687,8 +689,13 @@ function GroupInfoPanel({
 }) {
   const leaveGroup = useLeaveGroup();
   const removeMember = useRemoveGroupMember(conversation.id);
+  const updateGroup = useUpdateGroup(conversation.id);
   const isAdmin = conversation.adminId === currentUserId;
   const [showAddMember, setShowAddMember] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedName, setEditedName] = useState(conversation.name);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleLeave = async () => {
     if (!window.confirm('Are you sure you want to leave this group?')) return;
@@ -701,6 +708,28 @@ function GroupInfoPanel({
     await removeMember.mutateAsync(userId);
   };
 
+  const handleSave = async () => {
+    if (!editedName.trim()) return;
+    await updateGroup.mutateAsync({ name: editedName.trim() });
+    setIsEditing(false);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      await updateGroup.mutateAsync({ picture: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   return (
     <motion.div
       initial={{ x: '100%', opacity: 0 }}
@@ -711,23 +740,88 @@ function GroupInfoPanel({
     >
       <div className='h-16 px-4 flex items-center justify-between border-b border-border'>
         <h3 className='font-semibold'>Group info</h3>
-        <Button variant='ghost' size='icon' onClick={onClose}>
-          <X className='h-5 w-5' />
-        </Button>
+        <div className='flex items-center gap-1'>
+          {isEditing && (
+            <>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-8 w-8'
+                onClick={() => {
+                  setEditedName(conversation.name);
+                  setIsEditing(false);
+                }}
+              >
+                <X className='h-4 w-4' />
+              </Button>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-8 w-8 text-primary'
+                onClick={handleSave}
+                disabled={updateGroup.isPending}
+              >
+                <Check className='h-4 w-4' />
+              </Button>
+            </>
+          )}
+          {!isEditing && isAdmin && (
+            <Button
+              variant='ghost'
+              size='icon'
+              className='h-8 w-8 text-muted-foreground'
+              onClick={() => setIsEditing(true)}
+            >
+              <Pencil className='h-4 w-4' />
+            </Button>
+          )}
+          <Button variant='ghost' size='icon' onClick={onClose}>
+            <X className='h-5 w-5' />
+          </Button>
+        </div>
       </div>
 
       <div className='flex-1 overflow-y-auto scrollbar-thin'>
         {/* Group avatar + name */}
         <div className='flex flex-col items-center py-6 px-4 border-b border-border'>
-          <Avatar className='h-20 w-20 mb-3'>
-            <AvatarImage src={conversation.picture} />
-            <AvatarFallback className='text-2xl'>
-              {conversation.name[0]}
-            </AvatarFallback>
-          </Avatar>
-          <h4 className='font-semibold text-lg text-center'>
-            {conversation.name}
-          </h4>
+          <div className='relative group mb-3'>
+            <Avatar className='h-20 w-20'>
+              <AvatarImage src={conversation.picture} />
+              <AvatarFallback className='text-2xl'>
+                {conversation.name[0]}
+              </AvatarFallback>
+            </Avatar>
+            {isAdmin && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className='absolute inset-0 flex items-center justify-center bg-background/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity'
+              >
+                <Camera className='h-6 w-6 text-white' />
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              type='file'
+              accept='image/*'
+              onChange={handleFileChange}
+              className='hidden'
+            />
+          </div>
+
+          {isEditing ? (
+            <Input
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              className='text-center font-semibold text-lg h-9 bg-secondary'
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+            />
+          ) : (
+            <h4 className='font-semibold text-lg text-center truncate w-full px-2'>
+              {conversation.name}
+            </h4>
+          )}
+
           <p className='text-sm text-muted-foreground mt-1'>
             Group · {conversation.users.length} members
           </p>

@@ -94,6 +94,32 @@ export function useCreateGroup() {
   });
 }
 
+// ─── useUpdateGroup ───────────────────────────────────────────────────────────
+
+export function useUpdateGroup(conversationId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: { name?: string; picture?: string }) =>
+      conversationService.updateGroup(conversationId, payload),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(
+        conversationKeys.detail(conversationId),
+        updated,
+      );
+      queryClient.setQueryData<Conversation[]>(
+        conversationKeys.all,
+        (old = []) => old.map((c) => (c.id === conversationId ? updated : c)),
+      );
+      store.dispatch(setActiveConversation(updated));
+      toast.success('Group updated!');
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? 'Failed to update group');
+    },
+  });
+}
+
 // ─── useMarkRead ──────────────────────────────────────────────────────────────
 
 export function useMarkRead() {
