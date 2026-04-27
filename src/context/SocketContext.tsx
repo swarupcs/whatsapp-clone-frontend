@@ -133,6 +133,16 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         });
       }
     });
+
+    // Explicitly handle reconnection events from the manager to ensure cache invalidation
+    socket.io.on('reconnect', () => {
+      queryClient.invalidateQueries({ queryKey: conversationKeys.all });
+      if (activeConversationRef.current?.id) {
+        queryClient.invalidateQueries({
+          queryKey: messageKeys.list(activeConversationRef.current.id),
+        });
+      }
+    });
     socket.on(SOCKET_EVENTS.DISCONNECT, () => setConnected(false));
     socket.on(SOCKET_EVENTS.CONNECT_ERROR, () => setConnected(false));
 
