@@ -63,7 +63,7 @@ export function useCreateDirectConversation() {
             ? old
             : [conversation, ...old],
       );
-      store.dispatch(setActiveConversation(null));
+      store.dispatch(setActiveConversation(conversation));
     },
     onError: (err: any) => {
       toast.error(err?.message ?? 'Failed to start conversation');
@@ -85,7 +85,7 @@ export function useCreateGroup() {
         conversationKeys.all,
         (old = []) => [conversation, ...old],
       );
-      store.dispatch(setActiveConversation(null));
+      store.dispatch(setActiveConversation(conversation));
       toast.success('Group created!');
     },
     onError: (err: any) => {

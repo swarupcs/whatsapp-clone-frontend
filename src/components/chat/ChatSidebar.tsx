@@ -72,7 +72,7 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
   });
 
   const handleConversationClick = (conv: Conversation) => {
-    setActiveConversation(conv);
+    dispatch(setActiveConversation(conv));
     onConversationSelect?.();
     if (conv.unreadCount > 0) markRead.mutate(conv.id);
   };
