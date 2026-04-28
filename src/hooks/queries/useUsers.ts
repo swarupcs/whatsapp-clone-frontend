@@ -33,11 +33,13 @@ export function useUserSearch(q: string) {
 // ─── useOnlineUsers ───────────────────────────────────────────────────────────
 
 export function useOnlineUsers() {
+  const token = useAppSelector((state) => state.auth.token);
   return useQuery({
     queryKey: userKeys.online,
     queryFn: userService.getOnlineIds,
     refetchInterval: 30_000,
     staleTime: 10_000,
+    enabled: !!token,
   });
 }
 
