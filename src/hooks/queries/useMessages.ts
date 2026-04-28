@@ -69,7 +69,7 @@ export function useMessages(conversationId: string) {
     initialPageParam: 1,
     getNextPageParam: (lastPage: PaginatedData<Message>) =>
       lastPage.hasMore ? lastPage.page + 1 : undefined,
-    enabled: !!conversationId,
+    enabled: !!conversationId && !conversationId.startsWith('virtual_'),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     select: (data) => ({
@@ -136,12 +136,15 @@ export function useSendMessage(conversationId: string) {
       payload,
       files,
       optimisticId,
+      targetConvId,
     }: {
       payload: SendMessagePayload;
       files?: File[];
       optimisticId: string;
+      targetConvId?: string;
     }) => {
-      if (!conversationId || conversationId.trim() === '') {
+      const cid = targetConvId || conversationId;
+      if (!cid || cid.trim() === '') {
         return Promise.reject(new Error('No active conversation selected.'));
       }
 
@@ -154,26 +157,27 @@ export function useSendMessage(conversationId: string) {
       const sendFn = () =>
         files && files.length > 0
           ? messageService.sendWithFiles(
-              conversationId,
+              cid,
               payload.message,
               files,
               payload.replyTo,
             )
-          : messageService.send(conversationId, payload);
+          : messageService.send(cid, payload);
 
-      return enqueueSend(conversationId, sendFn);
+      return enqueueSend(cid, sendFn);
     },
 
-    onMutate: async ({ payload, files, optimisticId }) => {
-      if (!conversationId) return { optimisticId: null };
+    onMutate: async ({ payload, files, optimisticId, targetConvId }) => {
+      const cid = targetConvId || conversationId;
+      if (!cid) return { optimisticId: null, cid };
 
       await queryClient.cancelQueries({
-        queryKey: messageKeys.list(conversationId),
+        queryKey: messageKeys.list(cid),
       });
 
       const optimistic: Message = {
         id: optimisticId,
-        conversationId,
+        conversationId: cid,
         senderId: user?.id ?? '',
         message: payload.message,
         files: files?.map((f, i) => ({
@@ -194,7 +198,7 @@ export function useSendMessage(conversationId: string) {
         updatedAt: new Date().toISOString(),
       } as Message;
 
-      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+      queryClient.setQueryData(messageKeys.list(cid), (old: any) => {
         if (!old) {
           return {
             pages: [
@@ -217,13 +221,13 @@ export function useSendMessage(conversationId: string) {
         return { ...old, pages };
       });
 
-      return { optimisticId };
+      return { optimisticId, cid };
     },
 
     onSuccess: (sent, _vars, context) => {
-      if (!context?.optimisticId) return;
+      if (!context?.optimisticId || !context.cid) return;
 
-      queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
+      queryClient.setQueryData(messageKeys.list(context.cid), (old: any) => {
         if (!old) return old;
         return {
           ...old,
@@ -240,7 +244,7 @@ export function useSendMessage(conversationId: string) {
         conversationKeys.all,
         (old = []) =>
           old.map((c) =>
-            c.id === conversationId
+            c.id === context.cid
               ? { ...c, latestMessage: sent, updatedAt: sent.updatedAt }
               : c,
           ),
@@ -250,10 +254,10 @@ export function useSendMessage(conversationId: string) {
     onError: (err: any, vars, context) => {
       const errorMessage: string = err?.message ?? 'Failed to send message';
 
-      if (context?.optimisticId) {
+      if (context?.optimisticId && context.cid) {
         if (!isOnline()) {
           queryClient.setQueryData(
-            messageKeys.list(conversationId),
+            messageKeys.list(context.cid),
             (old: any) => {
               if (!old) return old;
               return {
@@ -273,7 +277,7 @@ export function useSendMessage(conversationId: string) {
           );
         } else {
           queryClient.setQueryData(
-            messageKeys.list(conversationId),
+            messageKeys.list(context.cid),
             (old: any) => {
               if (!old) return old;
               return {

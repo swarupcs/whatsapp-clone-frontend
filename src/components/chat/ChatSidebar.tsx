@@ -61,7 +61,7 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
   const logoutMutation = useLogout();
   const markRead = useMarkRead();
 
-  const filtered = conversations.filter((conv) => {
+  let filtered = conversations.filter((conv) => {
     const matchesSearch = conv.name
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
@@ -70,6 +70,17 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
     if (activeFilter === 'groups') return conv.isGroup;
     return true;
   });
+
+  if (
+    activeConversation &&
+    activeConversation.id.startsWith('virtual_') &&
+    searchQuery === '' &&
+    activeFilter === 'all'
+  ) {
+    if (!filtered.some((c) => c.id === activeConversation.id)) {
+      filtered = [activeConversation, ...filtered];
+    }
+  }
 
   const handleConversationClick = (conv: Conversation) => {
     dispatch(setActiveConversation(conv));

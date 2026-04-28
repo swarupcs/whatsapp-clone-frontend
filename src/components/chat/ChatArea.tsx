@@ -50,6 +50,7 @@ import {
   useLeaveGroup,
   useRemoveGroupMember,
   useUpdateGroup,
+  useCreateDirectConversation,
 } from '@/hooks/queries/useConversations';
 import { useTyping } from '@/hooks/useTyping';
 import { useScrollMessages } from '@/hooks/useScrollMessages';
@@ -178,11 +179,27 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
     ) ?? [];
   const isOtherTyping = typingUsersList.length > 0;
 
+  const createDm = useCreateDirectConversation();
+
+  const ensureRealConversation = async () => {
+    if (!convId.startsWith('virtual_')) return convId;
+    const targetUserId = convId.replace('virtual_', '');
+    try {
+      const realConv = await createDm.mutateAsync(targetUserId);
+      return realConv.id;
+    } catch (e) {
+      toast.error('Failed to start conversation');
+      return null;
+    }
+  };
+
   const handleSend = useCallback(async () => {
     if (!messageText.trim() && attachments.length === 0) return;
     if (!convId) return;
 
     stopTyping();
+    const targetConvId = await ensureRealConversation();
+    if (!targetConvId) return;
 
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -193,13 +210,14 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
       },
       files: attachments.length > 0 ? attachments : undefined,
       optimisticId,
+      targetConvId,
     });
 
     setMessageText('');
     setAttachments([]);
     setShowEmojiPicker(false);
     setReplyingTo(null);
-  }, [messageText, attachments, replyingTo, sendMessage, stopTyping, convId]);
+  }, [messageText, attachments, replyingTo, sendMessage, stopTyping, convId, createDm]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -216,6 +234,9 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
   };
 
   const handleFileSend = async (files: File[], caption: string) => {
+    const targetConvId = await ensureRealConversation();
+    if (!targetConvId) return;
+
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendMessage.mutateAsync({
       payload: {
@@ -224,6 +245,7 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
       },
       files,
       optimisticId,
+      targetConvId,
     });
     setAttachments([]);
     setShowFilePreview(false);
@@ -232,6 +254,12 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
 
   const handleVoiceComplete = async (blob: Blob | null) => {
     if (blob) {
+      const targetConvId = await ensureRealConversation();
+      if (!targetConvId) {
+        setIsRecording(false);
+        return;
+      }
+
       const file = new File([blob], `voice-${Date.now()}.webm`, {
         type: 'audio/webm',
       });
@@ -240,6 +268,7 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         payload: { message: '' },
         files: [file],
         optimisticId,
+        targetConvId,
       });
     }
     setIsRecording(false);
@@ -247,14 +276,18 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
 
   const handleRetryMessage = useCallback(
     async (msg: Message) => {
+      const targetConvId = await ensureRealConversation();
+      if (!targetConvId) return;
+
       const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       await sendMessage.mutateAsync({
         payload: { message: msg.message, replyTo: msg.replyTo },
         files: undefined,
         optimisticId,
+        targetConvId,
       });
     },
-    [sendMessage],
+    [sendMessage, convId, createDm],
   );
 
   if (!activeConversation) {

@@ -4,17 +4,46 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { useUserSearch } from '@/hooks/queries/useUsers';
-import { useCreateDirectConversation } from '@/hooks/queries/useConversations';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAppDispatch, useAppSelector } from '@/store';
+import { setActiveConversation } from '@/store/slices/chatSlice';
+import { conversationKeys } from '@/hooks/queries/useConversations';
+import type { Conversation, User } from '@/types';
 
 interface Props { open: boolean; onOpenChange: (open: boolean) => void; }
 
 export default function UserSearchModal({ open, onOpenChange }: Props) {
   const [query, setQuery] = useState('');
   const { data: results = [], isLoading } = useUserSearch(query);
-  const createDm = useCreateDirectConversation();
+  const queryClient = useQueryClient();
+  const dispatch = useAppDispatch();
+  const currentUser = useAppSelector((state) => state.auth.user);
 
-  const handleUserClick = async (userId: string) => {
-    await createDm.mutateAsync(userId);
+  const handleUserClick = (user: User) => {
+    const conversations = queryClient.getQueryData<Conversation[]>(conversationKeys.all) || [];
+    
+    // Check if a direct conversation already exists with this user
+    const existing = conversations.find(
+      (c) => !c.isGroup && c.users.some((u) => u.id === user.id)
+    );
+
+    if (existing) {
+      dispatch(setActiveConversation(existing));
+    } else {
+      // Create an optimistic "virtual" conversation to show in the UI immediately
+      const virtualConv: Conversation = {
+        id: `virtual_${user.id}`,
+        name: user.name,
+        picture: user.picture,
+        isGroup: false,
+        users: [currentUser!, user],
+        unreadCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      dispatch(setActiveConversation(virtualConv));
+    }
+
     setQuery('');
     onOpenChange(false);
   };
@@ -34,7 +63,7 @@ export default function UserSearchModal({ open, onOpenChange }: Props) {
           <div className='max-h-60 overflow-y-auto space-y-1 scrollbar-thin'>
             {isLoading && <div className='flex justify-center py-6'><Loader2 className='h-5 w-5 animate-spin text-primary' /></div>}
             {!isLoading && results.length > 0 && results.map((user) => (
-              <button key={user.id} onClick={() => handleUserClick(user.id)} disabled={createDm.isPending}
+              <button key={user.id} onClick={() => handleUserClick(user)}
                 className='w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors'>
                 <div className='relative'>
                   <Avatar className='h-12 w-12'>
