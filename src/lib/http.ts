@@ -38,17 +38,12 @@ export const http = {
    * axios automatically sets Content-Type with the correct boundary.
    */
   upload: <T>(path: string, formData: FormData, config?: RequestConfig): Promise<T> =>
-    axiosInstance
-      .post<T>(path, formData, {
-        ...config,
-        headers: {
-          ...config?.headers,
-          'Content-Type': 'multipart/form-data',
-        },
-      })
-      .then((res) => res.data),
-};
-
+  axiosInstance
+    .post<T>(path, formData, {
+      ...config,
+    })
+    .then((res) => res.data),
+  };
 /**
  * httpWithMeta — for paginated endpoints that need the `meta` alongside data.
  * Returns { data: T, meta: ApiMeta | undefined }
