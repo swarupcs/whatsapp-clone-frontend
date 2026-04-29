@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { PhoneOff, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 import { socketEmit } from '@/lib/socket';
@@ -57,6 +57,9 @@ export default function AudioCallModal({ localStream, remoteStream }: { localStr
   return (
     <Dialog open={isOpen} onOpenChange={handleEndCall}>
       <DialogContent className='max-w-md w-[90vw] p-0 border-0 bg-gradient-to-b from-card to-background overflow-hidden'>
+        <DialogHeader className="sr-only">
+          <DialogTitle>Audio Call with {contact.name}</DialogTitle>
+        </DialogHeader>
         <div className='flex flex-col items-center p-8'>
           <motion.div
             initial={{ scale: 0.5, opacity: 0 }}

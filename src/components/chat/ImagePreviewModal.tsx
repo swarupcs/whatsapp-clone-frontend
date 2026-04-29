@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, ZoomIn, ZoomOut, Download, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 interface Props { isOpen: boolean; onClose: () => void; imageUrl: string; imageName: string; }
 export default function ImagePreviewModal({ isOpen, onClose, imageUrl, imageName }: Props) {
   const [zoom, setZoom] = useState(1);
@@ -12,6 +12,9 @@ export default function ImagePreviewModal({ isOpen, onClose, imageUrl, imageName
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className='max-w-[90vw] max-h-[90vh] p-0 border-0 bg-transparent shadow-none overflow-hidden'>
+        <DialogHeader className="sr-only">
+          <DialogTitle>Image Preview: {imageName}</DialogTitle>
+        </DialogHeader>
         <div className='relative flex flex-col items-center'>
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
             className='absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-card/90 backdrop-blur-md border border-border shadow-lg'>

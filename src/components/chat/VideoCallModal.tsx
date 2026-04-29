@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { X, Mic, MicOff, Video, VideoOff, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 import { socketEmit } from '@/lib/socket';
 import { cn } from '@/lib/utils';
@@ -74,6 +74,9 @@ export default function VideoCallModal({ localStream, remoteStream }: { localStr
   return (
     <Dialog open={isOpen} onOpenChange={handleEndCall}>
       <DialogContent className='max-w-4xl w-[90vw] h-[85vh] p-0 border-0 bg-background/95 backdrop-blur-xl overflow-hidden'>
+        <DialogHeader className="sr-only">
+          <DialogTitle>Video Call with {contact.name}</DialogTitle>
+        </DialogHeader>
         <div ref={containerRef} className='relative w-full h-full flex flex-col'>
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
             className='absolute top-0 left-0 right-0 z-20 p-4 bg-gradient-to-b from-black/60 to-transparent'>
