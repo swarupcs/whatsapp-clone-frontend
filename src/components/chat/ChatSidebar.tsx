@@ -14,6 +14,9 @@ import {
   Plus,
   FileSearch,
   Loader2,
+  Pin,
+  BellOff,
+  Archive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +30,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
-
 import {
   useConversations,
   useMarkRead,
@@ -36,18 +38,41 @@ import { useLogout } from '@/hooks/queries/useAuth';
 import CreateGroupModal from './CreateGroupModal';
 import UserSearchModal from './UserSearchModal';
 import MessageSearchModal from './MessageSearchModal';
+import SwiftChatLogo from '@/components/shared/SwiftChatLogo';
+import ThemeToggle from '@/components/shared/ThemeToggle';
+import StatusDot from '@/components/shared/StatusDot';
 import type { Conversation } from '@/types';
 
 interface Props {
   onConversationSelect?: () => void;
 }
 
+// Generate a deterministic gradient color for avatars based on user/group name
+function getAvatarGradient(name: string): string {
+  const gradients = [
+    'from-orange-400 to-rose-500',
+    'from-violet-400 to-purple-600',
+    'from-sky-400 to-blue-600',
+    'from-emerald-400 to-teal-600',
+    'from-amber-400 to-orange-600',
+    'from-pink-400 to-violet-600',
+    'from-cyan-400 to-sky-600',
+    'from-rose-400 to-pink-600',
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length];
+}
+
+const filters = ['all', 'unread', 'groups', 'archived'] as const;
+type Filter = typeof filters[number];
+
 export default function ChatSidebar({ onConversationSelect }: Props) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'groups'>(
-    'all',
-  );
+  const [activeFilter, setActiveFilter] = useState<Filter>('all');
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -123,64 +148,54 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
 
   return (
     <div className='chat-sidebar'>
-      <div className='h-16 px-4 flex items-center justify-between border-b border-border bg-card/50'>
-        <button
-          onClick={() => navigate('/profile')}
-          className='flex items-center gap-3 hover:opacity-80 transition-opacity'
-        >
-          <Avatar className='h-10 w-10 ring-2 ring-primary/20'>
-            <AvatarImage src={user?.picture} />
-            <AvatarFallback>{user?.name?.[0]}</AvatarFallback>
-          </Avatar>
-          <div className='hidden lg:block text-left'>
-            <h3 className='font-semibold text-sm truncate'>{user?.name}</h3>
-            <p className='text-xs text-muted-foreground capitalize'>
-              {user?.status}
-            </p>
-          </div>
-        </button>
+      {/* Header */}
+      <div className='h-16 px-4 flex items-center justify-between border-b border-border'>
+        <SwiftChatLogo size='sm' />
         <div className='flex items-center gap-1'>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='text-muted-foreground hover:text-foreground'
-            onClick={() => setShowMessageSearch(true)}
-          >
-            <FileSearch className='h-5 w-5' />
-          </Button>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='text-muted-foreground hover:text-foreground'
-            onClick={() => setShowUserSearch(true)}
-          >
-            <Plus className='h-5 w-5' />
-          </Button>
+          <ThemeToggle />
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button
+              variant='ghost'
+              size='icon'
+              className='text-muted-foreground hover:text-foreground rounded-xl'
+              onClick={() => setShowUserSearch(true)}
+              aria-label='New chat'
+            >
+              <Plus className='h-5 w-5' />
+            </Button>
+          </motion.div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant='ghost'
                 size='icon'
-                className='text-muted-foreground hover:text-foreground'
+                className='text-muted-foreground hover:text-foreground rounded-xl'
+                aria-label='More options'
               >
                 <MoreVertical className='h-5 w-5' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='w-48'>
-              <DropdownMenuItem onClick={() => setShowCreateGroup(true)}>
+            <DropdownMenuContent align='end' className='w-48 rounded-xl border-border/50'>
+              <DropdownMenuItem onClick={() => setShowCreateGroup(true)} className='rounded-lg'>
                 <Users className='mr-2 h-4 w-4' /> New group
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowUserSearch(true)}>
+              <DropdownMenuItem onClick={() => setShowUserSearch(true)} className='rounded-lg'>
                 <MessageCircle className='mr-2 h-4 w-4' /> New chat
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowMessageSearch(true)} className='rounded-lg'>
+                <FileSearch className='mr-2 h-4 w-4' /> Search messages
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/settings')}>
+              <DropdownMenuItem onClick={() => navigate('/profile')} className='rounded-lg'>
+                <Settings className='mr-2 h-4 w-4' /> Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/settings')} className='rounded-lg'>
                 <Settings className='mr-2 h-4 w-4' /> Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
-                className='text-destructive focus:text-destructive'
+                className='text-destructive focus:text-destructive rounded-lg'
               >
                 <LogOut className='mr-2 h-4 w-4' /> Log out
               </DropdownMenuItem>
@@ -189,35 +204,46 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
         </div>
       </div>
 
+      {/* Search */}
       <div className='p-3'>
         <div className='relative'>
-          <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
+          <Search className='absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder='Search or start new chat'
-            className='pl-10 h-10 bg-secondary border-0 rounded-lg'
+            className='pl-11 h-10 bg-secondary border-0 rounded-xl'
+            aria-label='Search conversations'
           />
         </div>
       </div>
 
-      <div className='px-3 pb-2 flex gap-2'>
-        {(['all', 'unread', 'groups'] as const).map((f) => (
+      {/* Filter tabs */}
+      <div className='px-3 pb-2 flex gap-1.5'>
+        {filters.map((f) => (
           <Button
             key={f}
-            variant={activeFilter === f ? 'secondary' : 'ghost'}
+            variant='ghost'
             size='sm'
             className={cn(
-              'rounded-full text-xs h-7 px-3',
-              activeFilter !== f && 'text-muted-foreground',
+              'rounded-full text-xs h-7 px-3 transition-all',
+              activeFilter === f
+                ? 'gradient-primary text-white font-semibold shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
             )}
             onClick={() => setActiveFilter(f)}
+            aria-label={`Filter: ${f}`}
           >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {f === 'archived' ? (
+              <><Archive className='h-3 w-3 mr-1' />{f.charAt(0).toUpperCase() + f.slice(1)}</>
+            ) : (
+              f.charAt(0).toUpperCase() + f.slice(1)
+            )}
           </Button>
         ))}
       </div>
 
+      {/* Conversation list */}
       <div className='flex-1 overflow-y-auto scrollbar-thin'>
         {isLoading ? (
           <div className='flex items-center justify-center h-32'>
@@ -234,6 +260,8 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                 : false;
               const lastMessageSender = getLastMessageSender(conv);
               const preview = getLastMessagePreview(conv);
+              const isActive = activeConversation?.id === conv.id;
+              const gradient = getAvatarGradient(conv.name);
 
               return (
                 <motion.div
@@ -241,32 +269,35 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
-                  transition={{ delay: index * 0.03 }}
+                  transition={{ delay: index * 0.03, duration: 0.25 }}
                 >
                   <button
                     onClick={() => handleConversationClick(conv)}
                     className={cn(
                       'conversation-item w-full text-left',
-                      activeConversation?.id === conv.id && 'active',
+                      isActive && 'active',
                     )}
+                    aria-label={`Open chat with ${conv.name}`}
                   >
                     <div className='relative shrink-0'>
                       <Avatar className='h-12 w-12'>
                         <AvatarImage src={conv.picture} />
-                        <AvatarFallback>{conv.name[0]}</AvatarFallback>
+                        <AvatarFallback className={cn('bg-gradient-to-br text-white font-semibold', gradient)}>
+                          {conv.name[0]?.toUpperCase()}
+                        </AvatarFallback>
                       </Avatar>
                       {isOnline && !conv.isGroup && (
-                        <span className='absolute bottom-0 right-0 h-3 w-3 bg-status-online rounded-full border-2 border-sidebar' />
+                        <StatusDot status='online' size='md' className='absolute bottom-0 right-0' />
                       )}
                       {conv.isGroup && (
-                        <span className='absolute bottom-0 right-0 h-4 w-4 bg-primary/20 rounded-full border-2 border-sidebar flex items-center justify-center'>
-                          <Users className='h-2 w-2 text-primary' />
+                        <span className='absolute bottom-0 right-0 h-4 w-4 bg-brand-violet/20 rounded-full border-2 border-sidebar flex items-center justify-center'>
+                          <Users className='h-2 w-2 text-brand-violet' />
                         </span>
                       )}
                     </div>
                     <div className='flex-1 min-w-0'>
                       <div className='flex items-center justify-between mb-0.5'>
-                        <h4 className='font-medium text-sm truncate'>
+                        <h4 className='font-semibold text-sm truncate'>
                           {conv.name}
                         </h4>
                         {conv.latestMessage && (
@@ -274,7 +305,7 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                             className={cn(
                               'text-[11px] shrink-0 ml-2',
                               conv.unreadCount > 0
-                                ? 'text-primary font-medium'
+                                ? 'text-primary font-semibold'
                                 : 'text-muted-foreground',
                             )}
                           >
@@ -296,9 +327,14 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
                           {preview}
                         </p>
                         {conv.unreadCount > 0 && (
-                          <span className='shrink-0 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] font-medium bg-primary text-primary-foreground rounded-full'>
+                          <motion.span
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                            className='unread-badge'
+                          >
                             {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
-                          </span>
+                          </motion.span>
                         )}
                       </div>
                     </div>
@@ -310,8 +346,9 @@ export default function ChatSidebar({ onConversationSelect }: Props) {
         )}
         {!isLoading && filtered.length === 0 && (
           <div className='flex flex-col items-center justify-center h-48 text-muted-foreground'>
-            <MessageCircle className='h-12 w-12 mb-2 opacity-50' />
-            <p className='text-sm'>No conversations found</p>
+            <MessageCircle className='h-12 w-12 mb-3 opacity-30' />
+            <p className='text-sm font-medium'>No conversations found</p>
+            <p className='text-xs text-muted-foreground/60 mt-1'>Start a new chat to begin</p>
           </div>
         )}
       </div>

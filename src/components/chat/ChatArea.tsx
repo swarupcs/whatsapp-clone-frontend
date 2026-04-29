@@ -28,6 +28,7 @@ import {
   LogOut,
   UserMinus,
   Camera,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -296,12 +297,16 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className='text-center space-y-4'
+          className='text-center space-y-5'
         >
-          <div className='h-24 w-24 mx-auto rounded-full bg-primary/10 flex items-center justify-center'>
-            <Send className='h-12 w-12 text-primary' />
-          </div>
-          <h2 className='text-2xl font-semibold'>WhatsUp Web</h2>
+          <motion.div
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            className='h-24 w-24 mx-auto rounded-2xl gradient-primary flex items-center justify-center shadow-lg shadow-brand-orange/20'
+          >
+            <Zap className='h-12 w-12 text-white fill-white' />
+          </motion.div>
+          <h2 className='text-2xl font-display font-bold gradient-text'>SwiftChat</h2>
           <p className='text-muted-foreground max-w-sm'>
             Select a conversation to start chatting or search for someone to
             message.
@@ -320,7 +325,7 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
         )}
       >
         {/* Header */}
-        <div className='h-16 px-4 flex items-center gap-3 border-b border-border bg-card/50 backdrop-blur-sm relative z-10'>
+        <div className='h-16 px-4 flex items-center gap-3 border-b border-border bg-card/80 backdrop-blur-md relative z-10'>
           {onBack && (
             <Button
               variant='ghost'
@@ -587,7 +592,7 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
           )}
         </AnimatePresence>
 
-        <div className='p-4 border-t border-border bg-card/50 backdrop-blur-sm'>
+        <div className='p-4 border-t border-border bg-card/80 backdrop-blur-md'>
           <div className='flex items-center gap-2'>
             <Button
               variant='ghost'
@@ -629,14 +634,14 @@ export default function ChatArea({ onBack }: ChatAreaProps) {
               }}
               onKeyPress={handleKeyPress}
               placeholder='Type a message...'
-              className='flex-1 h-10 bg-secondary border-0 rounded-full px-4 focus:ring-2 focus:ring-primary/50'
+              className='flex-1 h-10 bg-secondary border-0 rounded-xl px-4 focus:ring-2 focus:ring-primary/50 transition-all'
             />
             {messageText.trim() || attachments.length > 0 ? (
               <Button
                 size='icon'
                 onClick={handleSend}
                 disabled={sendMessage.isPending}
-                className='gradient-glow shrink-0 rounded-full'
+                className='gradient-glow shrink-0 rounded-xl hover:shadow-lg hover:shadow-brand-orange/25 transition-shadow'
               >
                 {sendMessage.isPending ? (
                   <Loader2 className='h-4 w-4 animate-spin' />
@@ -1105,10 +1110,10 @@ function MessageBubble({
 
         <div
           className={cn(
-            'rounded-2xl px-4 py-2 shadow-sm',
+            'rounded-[18px] px-4 py-2.5 shadow-sm',
             isOwn
-              ? 'message-bubble-sent rounded-br-md'
-              : 'message-bubble-received rounded-bl-md',
+              ? 'message-bubble-sent rounded-br-[4px]'
+              : 'message-bubble-received rounded-bl-[4px]',
             message.isPinned && 'ring-1 ring-primary/30',
             isPending && 'opacity-60',
             isFailed && 'ring-1 ring-destructive/50 opacity-80',

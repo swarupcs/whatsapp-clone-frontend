@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { SocketProvider } from '@/context/SocketContext';
 import { useEffect } from 'react';
+import { useTheme } from '@/hooks/useTheme';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -53,11 +54,9 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return token ? <Navigate to='/' replace /> : <>{children}</>;
 }
 
-function DarkMode() {
-  useEffect(() => {
-    document.body.classList.add('dark');
-    return () => document.body.classList.remove('dark');
-  }, []);
+function ThemeInit() {
+  // This hook sets the theme class on html root element
+  useTheme();
   return null;
 }
 
@@ -65,56 +64,65 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <SocketProvider>
       <TooltipProvider>
-        <DarkMode />
-        <Toaster position='top-center' theme='dark' />
+        <ThemeInit />
+        <Toaster
+          position='top-right'
+          theme='system'
+          toastOptions={{
+            style: {
+              background: 'var(--card)',
+              color: 'var(--foreground)',
+              border: '1px solid var(--border)',
+              fontFamily: 'var(--font-sans)',
+            },
+          }}
+        />
         <BrowserRouter>
           <TokenSync />
           <AuthExpiredListener />
-          <div className='dark'>
-            <Routes>
-              <Route
-                path='/'
-                element={
-                  <ProtectedRoute>
-                    <Home />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path='/login'
-                element={
-                  <AuthRoute>
-                    <Login />
-                  </AuthRoute>
-                }
-              />
-              <Route
-                path='/register'
-                element={
-                  <AuthRoute>
-                    <Register />
-                  </AuthRoute>
-                }
-              />
-              <Route
-                path='/profile'
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path='/settings'
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path='*' element={<NotFound />} />
-            </Routes>
-          </div>
+          <Routes>
+            <Route
+              path='/'
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path='/login'
+              element={
+                <AuthRoute>
+                  <Login />
+                </AuthRoute>
+              }
+            />
+            <Route
+              path='/register'
+              element={
+                <AuthRoute>
+                  <Register />
+                </AuthRoute>
+              }
+            />
+            <Route
+              path='/profile'
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path='/settings'
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route path='*' element={<NotFound />} />
+          </Routes>
         </BrowserRouter>
       </TooltipProvider>
     </SocketProvider>
