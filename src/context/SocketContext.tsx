@@ -55,25 +55,53 @@ function upsertMessageInCache(
   message: Message,
 ) {
   queryClient.setQueryData(messageKeys.list(conversationId), (old: any) => {
-    if (!old)
-      return { pages: [{ data: [message], total: 1, page: 1, limit: 30, hasMore: false }], pageParams: [1] };
+    if (!old) {
+      return {
+        pages: [
+          {
+            data: [message],
+            total: 1,
+            page: 1,
+            limit: 30,
+            hasMore: false,
+          },
+        ],
+        pageParams: [1],
+      };
+    }
 
-    const pages: PaginatedData<Message>[] = old.pages.map(
-      (page: PaginatedData<Message>, idx: number) => {
-        if (idx !== old.pages.length - 1) return page;
-        const existing = page.data;
-        if (existing.some((m) => m.id === message.id)) return page;
-        const optimisticIdx = existing.findIndex(
-          (m) => m.id.startsWith('optimistic-') && m.senderId === message.senderId && m.message === message.message,
-        );
-        if (optimisticIdx !== -1) {
-          const newData = [...existing];
-          newData[optimisticIdx] = message;
-          return { ...page, data: newData };
-        }
-        return { ...page, data: [...existing, message] };
-      },
-    );
+    // Standard newest-first structure: new messages go to the start of the first page.
+    const pages = [...old.pages];
+    if (pages.length > 0) {
+      const firstPage = pages[0];
+      const existing = firstPage.data || [];
+
+      if (existing.some((m: any) => m.id === message.id)) return old;
+
+      const optimisticIdx = existing.findIndex(
+        (m: any) =>
+          m.id.startsWith('optimistic-') &&
+          m.senderId === message.senderId &&
+          m.message === message.message,
+      );
+
+      if (optimisticIdx !== -1) {
+        const newData = [...existing];
+        newData[optimisticIdx] = message;
+        pages[0] = { ...firstPage, data: newData };
+      } else {
+        pages[0] = { ...firstPage, data: [message, ...existing] };
+      }
+    } else {
+      pages.push({
+        data: [message],
+        total: 1,
+        page: 1,
+        limit: 30,
+        hasMore: false,
+      });
+    }
+
     return { ...old, pages };
   });
 }
@@ -94,13 +122,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   
   const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const activeConversation = useAppSelector((state) => state.chat.activeConversation);
   const onlineUsers = useAppSelector((state) => state.chat.onlineUsers);
-
-  const activeConversationRef = useRef<Conversation | null>(null);
-  useEffect(() => {
-    activeConversationRef.current = activeConversation;
-  }, [activeConversation]);
 
   const userIdRef = useRef<string | undefined>(user?.id);
   useEffect(() => { userIdRef.current = user?.id; });
@@ -127,9 +149,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       // If we just reconnected, we might have missed messages while offline.
       // Invalidate caches to silently fetch the latest data from the REST API.
       queryClient.invalidateQueries({ queryKey: conversationKeys.all });
-      if (activeConversationRef.current?.id) {
+      const activeConv = store.getState().chat.activeConversation;
+      if (activeConv?.id) {
         queryClient.invalidateQueries({
-          queryKey: messageKeys.list(activeConversationRef.current.id),
+          queryKey: messageKeys.list(activeConv.id),
         });
       }
     });
@@ -137,9 +160,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     // Explicitly handle reconnection events from the manager to ensure cache invalidation
     socket.io.on('reconnect', () => {
       queryClient.invalidateQueries({ queryKey: conversationKeys.all });
-      if (activeConversationRef.current?.id) {
+      const activeConv = store.getState().chat.activeConversation;
+      if (activeConv?.id) {
         queryClient.invalidateQueries({
-          queryKey: messageKeys.list(activeConversationRef.current.id),
+          queryKey: messageKeys.list(activeConv.id),
         });
       }
     });
@@ -155,13 +179,27 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on(SOCKET_EVENTS.TYPING_STOP, (data: TypingPayload) =>
       dispatch(setTyping({ conversationId: data.conversationId, userId: data.userId, isTyping: false })));
 
-    socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message }: NewMessagePayload) => {
+    socket.on(SOCKET_EVENTS.NEW_MESSAGE, ({ message, conversation }: NewMessagePayload) => {
       const currentUserId = userIdRef.current;
-      const isActiveConv = activeConversationRef.current?.id === message.conversationId;
+      const activeConv = store.getState().chat.activeConversation;
+      const isActiveConv = activeConv?.id === message.conversationId;
 
       upsertMessageInCache(queryClient, message.conversationId, message);
 
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) => {
+        const exists = old.some((c) => c.id === message.conversationId);
+        
+        if (!exists && conversation) {
+          // If the conversation doesn't exist in our list, add it (likely a new chat)
+          const newConv = {
+            ...conversation,
+            latestMessage: message,
+            updatedAt: message.updatedAt,
+            unreadCount: message.senderId === currentUserId ? 0 : 1,
+          };
+          return sortConversations([newConv, ...old]);
+        }
+
         const updated = old.map((c) =>
           c.id === message.conversationId
             ? {
@@ -180,8 +218,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
       if (!isActiveConv && message.senderId !== currentUserId) {
         const convList = queryClient.getQueryData<Conversation[]>(conversationKeys.all);
-        const conv = convList?.find((c) => c.id === message.conversationId);
-        const sender = conv?.users.find((u) => u.id === message.senderId);
+        const conv = convList?.find((c) => c.id === message.conversationId) || conversation;
+        const sender = conv?.users?.find((u: any) => u.id === message.senderId);
         const title = conv?.isGroup
           ? `${conv.name}: ${sender?.name ?? 'Someone'}`
           : (sender?.name ?? 'New message');
@@ -222,14 +260,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on('member_added', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.map((c) => (c.id === conversationId ? conversation : c)));
-      if (activeConversationRef.current?.id === conversationId)
+      if (store.getState().chat.activeConversation?.id === conversationId)
         dispatch(setActiveConversation(conversation));
     });
 
     socket.on('member_removed', ({ conversationId, conversation }: { conversationId: string; conversation: Conversation }) => {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.map((c) => (c.id === conversationId ? conversation : c)));
-      if (activeConversationRef.current?.id === conversationId)
+      if (store.getState().chat.activeConversation?.id === conversationId)
         dispatch(setActiveConversation(conversation));
     });
 
@@ -237,7 +275,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.map((c) => (c.id === conversationId ? conversation : c)));
       queryClient.setQueryData(conversationKeys.detail(conversationId), conversation);
-      if (activeConversationRef.current?.id === conversationId)
+      if (store.getState().chat.activeConversation?.id === conversationId)
         dispatch(setActiveConversation(conversation));
     });
 
@@ -245,7 +283,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       toast.info('You were removed from a group');
       queryClient.setQueryData<Conversation[]>(conversationKeys.all, (old = []) =>
         old.filter((c) => c.id !== conversationId));
-      if (activeConversationRef.current?.id === conversationId)
+      if (store.getState().chat.activeConversation?.id === conversationId)
         dispatch(setActiveConversation(null));
     });
 
