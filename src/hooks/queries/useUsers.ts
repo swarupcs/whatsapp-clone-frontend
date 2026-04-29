@@ -77,6 +77,32 @@ export function useUpdateProfile() {
   });
 }
 
+// ─── useUploadAvatar ──────────────────────────────────────────────────────────
+
+/**
+ * Uploads a profile picture file to ImageKit CDN via POST /users/me/avatar.
+ * On success, updates the auth store and query cache with the new picture URL.
+ */
+export function useUploadAvatar() {
+  const queryClient = useQueryClient();
+  const token = useAppSelector((state) => state.auth.token);
+
+  return useMutation({
+    mutationFn: (file: File) => userService.uploadAvatar(file),
+    onSuccess: (updated) => {
+      if (token) store.dispatch(setAuth({ user: updated, token }));
+      queryClient.setQueryData(['auth', 'me'], updated);
+      queryClient.setQueryData(userKeys.detail(updated.id), updated);
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      toast.success('Avatar updated successfully');
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? 'Failed to upload avatar');
+    },
+  });
+}
+
+
 // ─── useUpdateStatus ──────────────────────────────────────────────────────────
 
 export function useUpdateStatus() {

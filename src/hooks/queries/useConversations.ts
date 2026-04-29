@@ -120,6 +120,38 @@ export function useUpdateGroup(conversationId: string) {
   });
 }
 
+// ─── useUploadGroupPicture ────────────────────────────────────────────────────
+
+/**
+ * Uploads a group avatar image file to ImageKit CDN via
+ * POST /conversations/:id/picture.
+ * On success, updates the query cache and Redux active conversation.
+ */
+export function useUploadGroupPicture(conversationId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (file: File) =>
+      conversationService.uploadGroupPicture(conversationId, file),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(
+        conversationKeys.detail(conversationId),
+        updated,
+      );
+      queryClient.setQueryData<Conversation[]>(
+        conversationKeys.all,
+        (old = []) => old.map((c) => (c.id === conversationId ? updated : c)),
+      );
+      store.dispatch(setActiveConversation(updated));
+      toast.success('Group picture updated!');
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? 'Failed to upload group picture');
+    },
+  });
+}
+
+
 // ─── useMarkRead ──────────────────────────────────────────────────────────────
 
 export function useMarkRead() {

@@ -51,6 +51,7 @@ import {
   useLeaveGroup,
   useRemoveGroupMember,
   useUpdateGroup,
+  useUploadGroupPicture,
   useCreateDirectConversation,
 } from '@/hooks/queries/useConversations';
 import { useTyping } from '@/hooks/useTyping';
@@ -729,6 +730,7 @@ function GroupInfoPanel({
   const leaveGroup = useLeaveGroup();
   const removeMember = useRemoveGroupMember(conversation.id);
   const updateGroup = useUpdateGroup(conversation.id);
+  const uploadGroupPicture = useUploadGroupPicture(conversation.id);
   const isAdmin = conversation.adminId === currentUserId;
   const [showAddMember, setShowAddMember] = useState(false);
 
@@ -760,12 +762,8 @@ function GroupInfoPanel({
       toast.error('Please select an image file');
       return;
     }
-
-    const reader = new FileReader();
-    reader.onload = async () => {
-      await updateGroup.mutateAsync({ picture: reader.result as string });
-    };
-    reader.readAsDataURL(file);
+    // Upload directly to ImageKit via the backend endpoint
+    await uploadGroupPicture.mutateAsync(file);
     e.target.value = '';
   };
 

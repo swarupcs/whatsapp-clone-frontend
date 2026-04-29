@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 import { useMe, useLogout } from '@/hooks/queries/useAuth';
-import { useUpdateProfile, useUpdateStatus } from '@/hooks/queries/useUsers';
+import { useUpdateProfile, useUpdateStatus, useUploadAvatar } from '@/hooks/queries/useUsers';
 import { useTheme } from '@/hooks/useTheme';
 import type { UserStatus } from '@/types';
 
@@ -24,6 +24,7 @@ export default function Profile() {
   const { data: meData } = useMe();
   const currentUser = meData ?? user;
   const updateProfileMutation = useUpdateProfile();
+  const uploadAvatarMutation = useUploadAvatar();
   const updateStatusMutation = useUpdateStatus();
   const logoutMutation = useLogout();
   const { isDark, toggleTheme } = useTheme();
@@ -39,12 +40,8 @@ export default function Profile() {
     if (!file) return;
     if (!file.type.startsWith('image/')) { toast.error('Please select an image file'); return; }
     if (file.size > 10 * 1024 * 1024) { toast.error('Image must be smaller than 10MB'); return; }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      await updateProfileMutation.mutateAsync({ picture: reader.result as string });
-      setIsEditing(true);
-    };
-    reader.readAsDataURL(file);
+    // Upload directly to ImageKit via the backend endpoint
+    await uploadAvatarMutation.mutateAsync(file);
     e.target.value = '';
   };
 

@@ -57,4 +57,17 @@ export const conversationService = {
    */
   leaveGroup: (conversationId: string): Promise<null> =>
     http.post<null>(`/conversations/${conversationId}/leave`, {}),
+
+  /**
+   * POST /conversations/:id/picture
+   * Upload a group avatar image to ImageKit CDN.
+   * Field: "picture" (single image file).
+   * Returns the updated Conversation with the new picture URL.
+   */
+  uploadGroupPicture: (conversationId: string, file: File): Promise<Conversation> => {
+    const fd = new FormData();
+    fd.append('picture', file);
+    return http.upload<Conversation>(`/conversations/${conversationId}/picture`, fd);
+  },
 };
+

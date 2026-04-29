@@ -7,6 +7,7 @@
  *   GET  /users/:userId
  *   PATCH /users/me/profile
  *   PATCH /users/me/status
+ *   POST  /users/me/avatar  (multipart — field: "avatar")
  */
 
 import { http } from '../lib/http';
@@ -41,9 +42,21 @@ export const userService = {
     http.patch<User>('/users/me/profile', payload),
 
   /**
+   * POST /users/me/avatar
+   * Upload a new profile picture to ImageKit CDN.
+   * The returned user object includes the updated `picture` URL.
+   */
+  uploadAvatar: (file: File): Promise<User> => {
+    const fd = new FormData();
+    fd.append('avatar', file);
+    return http.upload<User>('/users/me/avatar', fd);
+  },
+
+  /**
    * PATCH /users/me/status
    * Updates authenticated user's presence status.
    */
   updateStatus: (payload: UpdateStatusPayload): Promise<User> =>
     http.patch<User>('/users/me/status', payload),
 };
+
